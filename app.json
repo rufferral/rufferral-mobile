@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Rufferral",
+    "slug": "rufferral",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "rufferral",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0e6e56"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rufferral.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Used to upload your pet's profile photo.",
+        "NSCameraUsageDescription": "Used to take your pet's profile photo."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0e6e56"
+      },
+      "package": "com.rufferral.app",
+      "versionCode": 1
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-notifications", { "icon": "./assets/notification-icon.png", "color": "#0e6e56" }],
+      ["expo-image-picker", { "photosPermission": "Used to upload your pet's profile photo." }]
+    ],
+    "experiments": { "typedRoutes": true }
+  }
+}
