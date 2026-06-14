@@ -1,4 +1,5 @@
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
 
@@ -25,7 +26,8 @@ export async function registerForPushNotifications(userId: string): Promise<stri
       lightColor: "#0e6e56",
     });
   }
-  const token = (await Notifications.getExpoPushTokenAsync()).data;
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+  const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
   await supabase.from("profiles").update({ push_token: token }).eq("id", userId);
   return token;
 }

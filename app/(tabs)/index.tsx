@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { StatusBadge } from "@/components/StatusBadge";
 import { registerForPushNotifications } from "@/lib/notifications";
+import { useAppReady } from "@/context/AppReadyContext";
 
 type PetEmbed = { id: string; name: string | null; species: string | null; breed: string | null; photo_url: string | null; };
 type ReferralRow = { id: string; status: string | null; speciality_needed: string | null; created_at: string; pets: PetEmbed | PetEmbed[] | null; };
@@ -20,6 +21,7 @@ export default function HomeScreen() {
   const scheme = useColorScheme();
   const dark = scheme === "dark";
   const c = dark ? Colors.dark : Colors.light;
+  const { setDashboardReady } = useAppReady();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [firstName, setFirstName] = useState("");
@@ -36,6 +38,7 @@ export default function HomeScreen() {
     setReferrals((refData ?? []) as ReferralRow[]);
     await registerForPushNotifications(user.id);
     setLoading(false);
+    setDashboardReady(true);
   }, []);
 
   useEffect(() => { void load(); }, [load]);

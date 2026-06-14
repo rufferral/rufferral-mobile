@@ -27,14 +27,37 @@
         "backgroundColor": "#0e6e56"
       },
       "package": "com.rufferral.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-notifications", { "icon": "./assets/notification-icon.png", "color": "#0e6e56" }],
-      ["expo-image-picker", { "photosPermission": "Used to upload your pet's profile photo." }]
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0e6e56"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Used to upload your pet's profile photo."
+        }
+      ]
     ],
-    "experiments": { "typedRoutes": true }
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9d1ff154-09e5-46f5-9f9b-8365c72a8787"
+      }
+    },
+    "owner": "rufferral"
   }
 }
