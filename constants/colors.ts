@@ -1,5 +1,21 @@
+// Green theme — applied app-wide (light/dark switching retired for now).
+// Both `light` and `dark` intentionally point to the same green palette so
+// existing screens using `dark ? Colors.dark : Colors.light` render green either way.
+const green = {
+  bg:        "#0c5b45", // page background (deepest green)
+  card:      "#0e6e56", // cards + nav bar (brand green)
+  cardInner: "#0c5b45", // nested tiles / inner surfaces
+  border:    "#92bdb3", // card outlines
+  text:      "#ffffff", // headings / primary text
+  subtext:   "#92bdb3", // labels + secondary text
+  muted:     "#92bdb3", // tertiary text
+};
+
 export const Colors = {
   brand: "#0e6e56",
+  // Nav bar tints
+  navActive: "#ffffff",
+  navInactive: "#92bdb3",
   status: {
     sent:       { bg: "#f59e0b", text: "#ffffff" },
     accepted:   { bg: "#3b82f6", text: "#ffffff" },
@@ -10,12 +26,6 @@ export const Colors = {
     declined:   { bg: "#ef4444", text: "#ffffff" },
     default:    { bg: "#94a3b8", text: "#ffffff" },
   },
-  light: {
-    bg: "#e8edf1", card: "#ffffff", cardInner: "#f8fafb",
-    border: "#e2e8f0", text: "#1e293b", subtext: "#64748b", muted: "#94a3b8",
-  },
-  dark: {
-    bg: "#000000", card: "#1c1c1e", cardInner: "#000000",
-    border: "#38383a", text: "#ffffff", subtext: "#8e8e93", muted: "#636366",
-  },
+  light: { ...green },
+  dark: { ...green },
 } as const;

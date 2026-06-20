@@ -14,8 +14,10 @@ import {
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { ScreenHeader } from "@/components/ScreenHeader";
 
 const GREEN = "#0e6e56";
+const PAGE_BG = "#0c5b45";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -417,7 +419,9 @@ export default function ReferralTrackerScreen() {
   const { address: clinicAddress, locLine: clinicLocLine } = specialistClinicAddressAndLocation(specialist);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: GREEN }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+    <View style={{ flex: 1, backgroundColor: PAGE_BG }}>
+      <ScreenHeader title="Referral Tracker" />
+      <ScrollView style={{ flex: 1, backgroundColor: PAGE_BG }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
       {/* Pet photo */}
       {pet?.photo_url ? (
         <View style={{ alignItems: "center", marginBottom: 16 }}>
@@ -519,12 +523,13 @@ export default function ReferralTrackerScreen() {
         © 2026 Rufferral · rufferral.com
       </Text>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, backgroundColor: GREEN, alignItems: "center", justifyContent: "center" },
-  card: { borderRadius: 16, borderWidth: 1.5, borderColor: W(0.18), backgroundColor: "rgba(255,255,255,0.04)", overflow: "hidden" },
+  center: { flex: 1, backgroundColor: PAGE_BG, alignItems: "center", justifyContent: "center" },
+  card: { borderRadius: 16, borderWidth: 0.75, borderColor: "#92bdb3", backgroundColor: GREEN, overflow: "hidden" },
   value: { fontSize: 15, fontWeight: "500", color: "#fff", lineHeight: 20 },
   subValue: { fontSize: 13, color: W(0.65), lineHeight: 18 },
 });

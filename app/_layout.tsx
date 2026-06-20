@@ -26,7 +26,6 @@ function RootContent() {
   const [loading, setLoading] = useState(true);
   const [splashDone, setSplashDone] = useState(false);
   const { dashboardReady } = useAppReady();
-
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -36,21 +35,16 @@ function RootContent() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
-
   useAuthGuard(session, loading);
-
-  // Splash may fade once auth is resolved. If a session exists, also wait for
-  // the dashboard's data to be ready so we reveal a finished screen.
   const appReady = !loading && (!session || dashboardReady);
-
   return (
     <>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="referral/[id]" options={{ headerShown: true, title: "Referral Tracker", headerBackTitle: "Back", headerTintColor: "#0e6e56" }} />
-        <Stack.Screen name="pet/[id]" options={{ headerShown: true, title: "Pet Profile", headerBackTitle: "Back", headerTintColor: "#0e6e56" }} />
+        <Stack.Screen name="referral/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="pet/[id]" options={{ headerShown: false }} />
       </Stack>
       {!splashDone && (
         <AnimatedSplash appReady={appReady} onFinish={() => setSplashDone(true)} />

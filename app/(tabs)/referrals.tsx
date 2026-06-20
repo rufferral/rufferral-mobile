@@ -1,72 +1,105 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image, RefreshControl, useColorScheme, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
-import { StatusBadge } from "@/components/StatusBadge";
+import { PetCard, PetCardData, CardReferral } from "@/components/PetCard";
+import { EventLike } from "@/lib/referralProgress";
 
-type PetEmbed = { id: string; name: string | null; photo_url: string | null; };
-type ReferralRow = { id: string; status: string | null; speciality_needed: string | null; created_at: string; pets: PetEmbed | PetEmbed[] | null; };
+type PetEmbed = { id: string; name: string | null; species: string | null; breed: string | null; date_of_birth: string | null; photo_url: string | null; };
+type ReferralRow = { id: string; status: string | null; speciality_needed: string | null; created_at: string; pet_id: string | null; pets: PetEmbed | PetEmbed[] | null; };
 
-function petFromReferral(r: ReferralRow): PetEmbed | null {
+function petEmbed(r: ReferralRow): PetEmbed | null {
   if (!r.pets) return null;
   return Array.isArray(r.pets) ? (r.pets[0] ?? null) : r.pets;
 }
 
-function formatDate(iso: string) {
-  try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
-}
+const PAST = ["completed", "declined"];
 
 export default function ReferralsScreen() {
-  const router = useRouter();
-  const scheme = useColorScheme();
-  const dark = scheme === "dark";
-  const c = dark ? Colors.dark : Colors.light;
+  const c = Colors.light;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [activePets, setActivePets] = useState<PetCardData[]>([]);
+  const [historyPets, setHistoryPets] = useState<PetCardData[]>([]);
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase.from("referrals").select("id, status, speciality_needed, created_at, pets(id, name, photo_url)").ilike("owner_email", user.email ?? "").order("created_at", { ascending: false });
-    setReferrals((data ?? []) as ReferralRow[]);
+
+    const { data: refData } = await supabase
+      .from("referrals")
+      .select("id, status, speciality_needed, created_at, pet_id, pets(id, name, species, breed, date_of_birth, photo_url)")
+      .ilike("owner_email", user.email ?? "")
+      .order("created_at", { ascending: false });
+    const allRefs = (refData ?? []) as ReferralRow[];
+
+    const refIds = allRefs.map(r => r.id);
+    const eventsByRef: Record<string, EventLike[]> = {};
+    const lastUpdateByRef: Record<string, string | null> = {};
+    if (refIds.length > 0) {
+      const { data: evData } = await supabase
+        .from("referral_events")
+        .select("referral_id, event_type, created_at")
+        .in("referral_id", refIds)
+        .order("created_at", { ascending: false });
+      for (const ev of (evData ?? []) as { referral_id: string; event_type: string | null; created_at: string | null }[]) {
+        (eventsByRef[ev.referral_id] ??= []).push({ event_type: ev.event_type, created_at: ev.created_at });
+        if (!(ev.referral_id in lastUpdateByRef)) lastUpdateByRef[ev.referral_id] = ev.created_at;
+      }
+    }
+
+    const buildGroup = (predicate: (r: ReferralRow) => boolean): PetCardData[] => {
+      const map = new Map<string, PetCardData>();
+      for (const r of allRefs) {
+        if (!predicate(r)) continue;
+        const pe = petEmbed(r);
+        const pid = pe?.id ?? r.pet_id;
+        if (!pid || !pe) continue;
+        if (!map.has(pid)) map.set(pid, { id: pid, name: pe.name, species: pe.species, breed: pe.breed, date_of_birth: pe.date_of_birth, photo_url: pe.photo_url, referrals: [] });
+        const cardRef: CardReferral = {
+          id: r.id, status: r.status, speciality_needed: r.speciality_needed, created_at: r.created_at,
+          events: eventsByRef[r.id] ?? [], lastUpdate: lastUpdateByRef[r.id] ?? null,
+        };
+        map.get(pid)!.referrals!.push(cardRef);
+      }
+      return Array.from(map.values());
+    };
+
+    setActivePets(buildGroup(r => !PAST.includes((r.status ?? "").toLowerCase())));
+    setHistoryPets(buildGroup(r => PAST.includes((r.status ?? "").toLowerCase())));
     setLoading(false);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
-  const active = referrals.filter(r => !["completed", "declined"].includes((r.status ?? "").toLowerCase()));
-  const past = referrals.filter(r => ["completed", "declined"].includes((r.status ?? "").toLowerCase()));
+  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg, alignItems: "center", justifyContent: "center" }}><ActivityIndicator color="#ffffff" /></SafeAreaView>;
 
-  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg, alignItems: "center", justifyContent: "center" }}><ActivityIndicator color={Colors.brand} /></SafeAreaView>;
-
-  const ReferralCard = ({ row }: { row: ReferralRow }) => {
-    const pet = petFromReferral(row);
-    return (
-      <TouchableOpacity onPress={() => router.push(`/referral/${row.id}`)} style={{ backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 16, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 12 }}>
-        {pet?.photo_url ? <Image source={{ uri: pet.photo_url }} style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: c.border }} /> : <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c.cardInner, borderWidth: 1, borderColor: c.border, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 20 }}>🐾</Text></View>}
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>{pet?.name ?? "—"} — {row.speciality_needed ?? "Specialist"}</Text>
-          <Text style={{ fontSize: 12, color: c.subtext, marginTop: 2 }}>{formatDate(row.created_at)}</Text>
-        </View>
-        <StatusBadge status={row.status} />
-      </TouchableOpacity>
-    );
-  };
+  const sectionLabel = { fontSize: 13, fontWeight: "700" as const, color: c.subtext, letterSpacing: 0.8, textTransform: "uppercase" as const, marginBottom: 12 };
+  const hasAny = activePets.length > 0 || historyPets.length > 0;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 20 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brand} />}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: c.text, marginBottom: 20 }}>Referrals</Text>
-        {referrals.length === 0 ? (
+
+        {!hasAny ? (
           <Text style={{ color: c.subtext, textAlign: "center", marginTop: 40 }}>No referrals yet.</Text>
         ) : (
           <>
-            {active.length > 0 && <View style={{ marginBottom: 24 }}><Text style={{ fontSize: 13, fontWeight: "700", color: c.subtext, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12 }}>Active ({active.length})</Text>{active.map(r => <ReferralCard key={r.id} row={r} />)}</View>}
-            {past.length > 0 && <View><Text style={{ fontSize: 13, fontWeight: "700", color: c.subtext, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12 }}>History</Text>{past.map(r => <ReferralCard key={r.id} row={r} />)}</View>}
+            {activePets.length > 0 ? (
+              <View style={{ marginBottom: 24 }}>
+                <Text style={sectionLabel}>Active ({activePets.reduce((n, p) => n + (p.referrals?.length ?? 0), 0)})</Text>
+                {activePets.map(pet => <PetCard key={pet.id} pet={pet} />)}
+              </View>
+            ) : null}
+            {historyPets.length > 0 ? (
+              <View>
+                <Text style={sectionLabel}>History</Text>
+                {historyPets.map(pet => <PetCard key={pet.id} pet={pet} />)}
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
