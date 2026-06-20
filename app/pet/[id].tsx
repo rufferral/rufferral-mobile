@@ -252,7 +252,6 @@ export default function PetProfileScreen() {
   };
 
   const saveOwnership = async () => {
-    Keyboard.dismiss();
     setSavingOwnership(true);
     const finalProvider = oInsurance === "Other" ? (oCustomInsurance.trim() || null) : (oInsurance || null);
     const showPolicy = oInsurance !== "" && oInsurance !== "None";
@@ -267,8 +266,9 @@ export default function PetProfileScreen() {
     setPet(prev => prev ? { ...prev, ...fields } as PetRow : prev);
     const savedY = scrollY.current;
     setEditingOwnership(false);
-    // Hold position after the edit→read swap (keyboard already dismissed above).
-    requestAnimationFrame(() => { scrollRef.current?.scrollToPosition?.(0, savedY, false); });
+    // After the card swaps edit→read and the keyboard dismisses, restore position.
+    setTimeout(() => { scrollRef.current?.scrollToPosition?.(0, savedY, false); }, 100);
+    setTimeout(() => { scrollRef.current?.scrollToPosition?.(0, savedY, false); }, 300);
   };
 
   const loadData = useCallback(async () => {
