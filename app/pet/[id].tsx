@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -8,16 +8,19 @@ import {
   ActivityIndicator,
   Linking,
   Alert,
+  Keyboard,
   useColorScheme,
   StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
-import { EditText, EditDate, EditSelect, EditCardHeader } from "@/components/EditFields";
+import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader } from "@/components/EditFields";
+import { INSURANCE_PROVIDERS } from "@/lib/insuranceProviders";
 
 // ── Types (ported from web) ────────────────────────────────────────────────
 type PetRow = {
@@ -31,7 +34,7 @@ type PetRow = {
   other_pets: string | null; temperament: string | null; training_level: string | null;
   known_allergies: string | null; chronic_conditions: string | null;
   vaccination_status: string | null; last_vaccinated: string | null; desexed_date: string | null;
-  acquisition_source: string | null; insurance_provider: string | null;
+  acquisition_source: string | null; insurance_provider: string | null; insurance_policy_number: string | null;
 };
 
 type ReferralRow = {
@@ -98,6 +101,9 @@ function Field({ label, value, c }: { label: string; value: string | null | unde
 
 export default function PetProfileScreen() {
   const params = useLocalSearchParams();
+  const scrollRef = useRef<any>(null);
+  const scrollY = useRef(0); // tracks current scroll offset
+  const ownershipY = useRef(0); // Y position of the Ownership card
   const router = useRouter();
   const petId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
   const scheme = useColorScheme();
@@ -229,20 +235,40 @@ export default function PetProfileScreen() {
   const [savingOwnership, setSavingOwnership] = useState(false);
   const [oAcquisition, setOAcquisition] = useState("");
   const [oInsurance, setOInsurance] = useState("");
+  const [oPolicyNumber, setOPolicyNumber] = useState("");
+  const [oCustomInsurance, setOCustomInsurance] = useState("");
+  const [providerList, setProviderList] = useState<string[]>([]);
 
   const seedOwnershipFields = (p: PetRow) => {
     setOAcquisition(p.acquisition_source ?? "");
-    setOInsurance(p.insurance_provider ?? "");
+    const prov = p.insurance_provider ?? "";
+    // If the stored provider isn't in our list, treat it as a custom "Other" value.
+    if (prov && providerList.length > 0 && !providerList.includes(prov) && prov !== "None") {
+      setOInsurance("Other"); setOCustomInsurance(prov);
+    } else {
+      setOInsurance(prov); setOCustomInsurance("");
+    }
+    setOPolicyNumber(p.insurance_policy_number ?? "");
   };
 
   const saveOwnership = async () => {
+    Keyboard.dismiss();
     setSavingOwnership(true);
-    const fields = { acquisition_source: oAcquisition || null, insurance_provider: oInsurance || null };
+    const finalProvider = oInsurance === "Other" ? (oCustomInsurance.trim() || null) : (oInsurance || null);
+    const showPolicy = oInsurance !== "" && oInsurance !== "None";
+    const fields = {
+      acquisition_source: oAcquisition || null,
+      insurance_provider: finalProvider,
+      insurance_policy_number: showPolicy ? (oPolicyNumber || null) : null,
+    };
     const { error } = await supabase.from("pets").update(fields).eq("id", petId);
     setSavingOwnership(false);
     if (error) { Alert.alert("Couldn't save", error.message); return; }
     setPet(prev => prev ? { ...prev, ...fields } as PetRow : prev);
+    const savedY = scrollY.current;
     setEditingOwnership(false);
+    // Hold position after the edit→read swap (keyboard already dismissed above).
+    requestAnimationFrame(() => { scrollRef.current?.scrollToPosition?.(0, savedY, false); });
   };
 
   const loadData = useCallback(async () => {
@@ -278,6 +304,12 @@ export default function PetProfileScreen() {
     }
 
     setLoadState("ready");
+
+    // Insurance providers — read from DB so mobile stays in sync with web; fall back to bundled AU list.
+    const { data: provData } = await supabase.from("insurance_providers").select("name").eq("active", true).order("name", { ascending: true });
+    const names = (provData ?? []).map(r => (r as { name: string }).name).filter(Boolean)
+      .filter(n => n !== "None" && n !== "Other");
+    setProviderList(names.length > 0 ? names : [...INSURANCE_PROVIDERS]);
   }, [petId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
@@ -305,7 +337,16 @@ export default function PetProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <ScreenHeader title="Pet Profile" />
-      <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView
+        ref={scrollRef}
+        style={{ flex: 1, backgroundColor: c.bg }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+        enableOnAndroid={true}
+        extraScrollHeight={24}
+        scrollEventThrottle={16}
+        onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+      >
 
       {/* Pet header card */}
       <View style={[card, { alignItems: "center", paddingVertical: 24 }]}>
@@ -619,12 +660,33 @@ export default function PetProfileScreen() {
                 { label: "Gift", value: "Gift" },
                 { label: "Other", value: "Other" },
               ]} />
-            <EditText label="Pet insurance provider" value={oInsurance} onChange={setOInsurance} placeholder="e.g. Petplan, RSPCA, Bow Wow" />
+            <EditSelectSearch
+              label="Pet insurance provider"
+              value={oInsurance}
+              onChange={(v) => {
+                setOInsurance(v);
+                if (v === "" || v === "None") { setOPolicyNumber(""); }
+                if (v !== "Other") { setOCustomInsurance(""); }
+                // Gentle nudge to guide the user toward the now-visible policy field.
+                if (v !== "" && v !== "None") {
+                  setTimeout(() => { scrollRef.current?.scrollToPosition?.(0, scrollY.current + 110, true); }, 150);
+                }
+              }}
+              options={["None", ...providerList, "Other"]}
+              placeholder="Select insurance provider"
+            />
+            {oInsurance === "Other" ? (
+              <EditText label="Insurance provider name" value={oCustomInsurance} onChange={setOCustomInsurance} placeholder="Please specify" />
+            ) : null}
+            {oInsurance !== "" && oInsurance !== "None" ? (
+              <EditText label="Policy number" value={oPolicyNumber} onChange={setOPolicyNumber} placeholder="e.g. POL-123456" />
+            ) : null}
           </>
         ) : (
           <>
             <Field label="Acquisition source" value={pet.acquisition_source} c={c} />
             <Field label="Pet insurance provider" value={pet.insurance_provider} c={c} />
+            <Field label="Policy number" value={pet.insurance_policy_number} c={c} />
           </>
         )}
       </View>
@@ -677,7 +739,7 @@ export default function PetProfileScreen() {
         )}
       </View>
 
-    </ScrollView>
+    </KeyboardAwareScrollView>
     </View>
   );
 }
