@@ -11,6 +11,51 @@ const inputBox = {
   paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 15,
 } as const;
 
+export function EditNumberStepper({ label, value, onChange, placeholder, step = 0.1, min = 0, decimals = 1, unit }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+  step?: number; min?: number; decimals?: number; unit?: string;
+}) {
+  const adjust = (dir: 1 | -1) => {
+    const current = parseFloat(value);
+    const base = isNaN(current) ? 0 : current;
+    let next = base + dir * step;
+    if (next < min) next = min;
+    // Round to the given decimals to avoid floating-point noise (e.g. 3.300000001).
+    const rounded = Number(next.toFixed(decimals));
+    onChange(String(rounded));
+  };
+
+  const btnStyle = {
+    width: 44, height: 44, borderRadius: 8, borderWidth: 0.75, borderColor: c.border,
+    backgroundColor: c.cardInner, alignItems: "center" as const, justifyContent: "center" as const,
+  };
+
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <Text style={labelStyle}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <TouchableOpacity onPress={() => adjust(-1)} style={btnStyle}>
+          <Text style={{ color: c.text, fontSize: 22, fontWeight: "600", lineHeight: 24 }}>−</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+          <TextInput
+            value={value}
+            onChangeText={onChange}
+            placeholder={placeholder}
+            placeholderTextColor={c.muted}
+            keyboardType="decimal-pad"
+            style={[inputBox, { flex: 1, textAlign: "center" }]}
+          />
+          {unit ? <Text style={{ color: c.subtext, fontSize: 15, marginLeft: 8 }}>{unit}</Text> : null}
+        </View>
+        <TouchableOpacity onPress={() => adjust(1)} style={btnStyle}>
+          <Text style={{ color: c.text, fontSize: 22, fontWeight: "600", lineHeight: 24 }}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 export function EditText({ label, value, onChange, placeholder, keyboardType, onFocus }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string;
   keyboardType?: "default" | "numeric" | "decimal-pad";

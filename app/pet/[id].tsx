@@ -15,11 +15,18 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import { decode } from "base64-arraybuffer";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
-import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader } from "@/components/EditFields";
+import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditNumberStepper } from "@/components/EditFields";
+import { BREED_OPTIONS, OTHER_LISTED_VALUE, OTHER_BREED_OPTION_LABEL } from "@/lib/breedOptions";
+
+const SPECIES_OPTIONS = ["Bird", "Cat", "Dog", "Fish", "Guinea Pig", "Horse", "Other", "Rabbit", "Reptile"];
+const SEX_OPTS = ["Female desexed", "Female intact", "Male neutered", "Male intact"];
 import { INSURANCE_PROVIDERS } from "@/lib/insuranceProviders";
 
 // ── Types (ported from web) ────────────────────────────────────────────────
@@ -115,6 +122,85 @@ export default function PetProfileScreen() {
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([]);
   const [practice, setPractice] = useState<PracticeInfo | null>(null);
+
+  // ── Pet identity (header) editing ──
+  const [editingHeader, setEditingHeader] = useState(false);
+  const [savingHeader, setSavingHeader] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const seedingHeader = useRef(false); // true while seeding so the species-change effect doesn't wipe breed
+  const [hName, setHName] = useState("");
+  const [hSpecies, setHSpecies] = useState("");
+  const [hBreedSelect, setHBreedSelect] = useState("");
+  const [hBreedCustom, setHBreedCustom] = useState("");
+  const [hSex, setHSex] = useState("");
+  const [hDob, setHDob] = useState("");
+  const [hWeight, setHWeight] = useState("");
+
+  const seedHeaderFields = (p: PetRow) => {
+    seedingHeader.current = true; // suppress the species-change breed-reset during seeding
+    setHName(p.name ?? "");
+    setHSpecies(p.species ?? "");
+    const breedList = BREED_OPTIONS[p.species ?? ""] ?? [];
+    if (p.breed && breedList.length > 0 && !breedList.includes(p.breed)) {
+      setHBreedSelect(OTHER_LISTED_VALUE); setHBreedCustom(p.breed);
+    } else {
+      setHBreedSelect(p.breed ?? ""); setHBreedCustom("");
+    }
+    setHSex(p.sex ?? "");
+    setHDob(p.date_of_birth?.split("T")[0] ?? "");
+    setHWeight(p.weight_kg != null ? String(p.weight_kg) : "");
+  };
+
+  const headerBreedOptions = BREED_OPTIONS[hSpecies] ?? [];
+  const headerHasBreedList = headerBreedOptions.length > 0;
+  const headerBreedLabel = hSpecies === "Fish" || hSpecies === "Bird" || hSpecies === "Reptile" ? "Species/Type" : "Breed";
+  const headerResolvedBreed = () => hBreedSelect === OTHER_LISTED_VALUE ? hBreedCustom.trim() : hBreedSelect.trim();
+
+  const saveHeader = async () => {
+    if (!hName.trim()) { Alert.alert("Required", "Pet name is required."); return; }
+    setSavingHeader(true);
+    const fields = {
+      name: hName.trim(),
+      species: hSpecies || null,
+      breed: headerResolvedBreed() || null,
+      sex: hSex || null,
+      date_of_birth: hDob || null,
+      weight_kg: hWeight ? parseFloat(hWeight) : null,
+    };
+    const { error } = await supabase.from("pets").update(fields).eq("id", petId);
+    setSavingHeader(false);
+    if (error) { Alert.alert("Couldn't save", error.message); return; }
+    setPet(prev => prev ? { ...prev, ...fields } as PetRow : prev);
+    setEditingHeader(false);
+  };
+
+  const PET_PHOTOS_BUCKET = "pet-photos";
+  const changePhoto = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Please allow photo access to change the photo."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.9,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    const uri = result.assets[0].uri;
+    setUploadingPhoto(true);
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const arrayBuffer = decode(base64);
+      const ext = (uri.split(".").pop() || "jpg").split("?")[0].toLowerCase();
+      const contentType = ext === "png" ? "image/png" : "image/jpeg";
+      const path = `pets/${petId}/profile_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from(PET_PHOTOS_BUCKET).upload(path, arrayBuffer, { upsert: true, contentType });
+      if (upErr) { Alert.alert("Photo upload failed", upErr.message); setUploadingPhoto(false); return; }
+      const { data: { publicUrl } } = supabase.storage.from(PET_PHOTOS_BUCKET).getPublicUrl(path);
+      const { error: updErr } = await supabase.from("pets").update({ photo_url: publicUrl }).eq("id", petId);
+      if (updErr) { Alert.alert("Couldn't save photo", updErr.message); setUploadingPhoto(false); return; }
+      setPet(prev => prev ? { ...prev, photo_url: publicUrl } as PetRow : prev);
+    } catch (e) {
+      Alert.alert("Photo error", e instanceof Error ? e.message : String(e));
+    }
+    setUploadingPhoto(false);
+  };
 
   // ── Health & Medical editing ──
   const [editingHealth, setEditingHealth] = useState(false);
@@ -290,7 +376,7 @@ export default function PetProfileScreen() {
     setPrescriptions((rxData ?? []) as PrescriptionRow[]);
 
     const { data: latestReferral } = await supabase.from("referrals")
-      .select("practice_id, referring_vet_id").eq("owner_email", user?.email ?? "")
+      .select("practice_id, referring_vet_id").eq("pet_id", petId)
       .not("practice_id", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
     const lr = latestReferral as { practice_id?: string | null; referring_vet_id?: string | null } | null;
     if (lr?.practice_id) {
@@ -313,6 +399,11 @@ export default function PetProfileScreen() {
   }, [petId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+  // When species changes during header editing, reset the breed selection.
+  useEffect(() => {
+    if (seedingHeader.current) { seedingHeader.current = false; return; } // skip reset on initial seed
+    if (editingHeader) { setHBreedSelect(""); setHBreedCustom(""); }
+  }, [hSpecies]);
 
   if (loadState === "loading") {
     return <SafeAreaView style={[styles.center, { backgroundColor: c.bg }]}><ActivityIndicator color={Colors.brand} /></SafeAreaView>;
@@ -349,36 +440,86 @@ export default function PetProfileScreen() {
       >
 
       {/* Pet header card */}
-      <View style={[card, { alignItems: "center", paddingVertical: 24 }]}>
-        {pet.photo_url ? (
-          <Image source={{ uri: pet.photo_url }} style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 0.75, borderColor: c.border }} />
+      <View style={[card, { paddingVertical: 24 }]}>
+        {editingHeader ? (
+          <>
+            <TouchableOpacity onPress={() => setEditingHeader(false)} disabled={savingHeader} style={{ position: "absolute", top: 12, left: 12, zIndex: 5, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
+              <Text style={{ color: c.subtext, fontSize: 13, fontWeight: "600" }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => void saveHeader()} disabled={savingHeader} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, backgroundColor: Colors.brand }}>
+              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>{savingHeader ? "Saving…" : "Save"}</Text>
+            </TouchableOpacity>
+          </>
         ) : (
-          <View style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 0.75, borderColor: c.border, backgroundColor: c.cardInner, alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ fontSize: 48 }}>🐾</Text>
-          </View>
+          <TouchableOpacity onPress={() => { if (pet) seedHeaderFields(pet); setEditingHeader(true); }} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
+            <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>Edit</Text>
+          </TouchableOpacity>
         )}
-        <Text style={{ fontSize: 26, fontWeight: "700", color: c.text, marginTop: 14 }}>{pet.name ?? "—"}</Text>
-        <Text style={{ fontSize: 15, color: c.subtext, marginTop: 2 }}>{[pet.species, pet.breed].filter(Boolean).join(" · ") || "—"}</Text>
 
-        {/* Stat tiles */}
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 16, alignSelf: "stretch" }}>
-          <View style={statTile}>
-            <Text style={statHead}>Sex</Text>
-            {(pet.sex && pet.sex.trim().split(/\s+/).length === 2
-              ? pet.sex.trim().split(/\s+/)
-              : [pet.sex || "—"]
-            ).map((line, i) => (
-              <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
-            ))}
-          </View>
-          <View style={statTile}>
-            <Text style={statHead}>Age</Text>
-            {ageLines(ageDisplay).map((line, i) => (
-              <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
-            ))}
-          </View>
-          <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}</Text></View>
+        <View style={{ alignItems: "center", marginTop: editingHeader ? 24 : 0 }}>
+          <TouchableOpacity disabled={!editingHeader || uploadingPhoto} onPress={editingHeader ? changePhoto : undefined} activeOpacity={0.8}>
+            {pet.photo_url ? (
+              <Image source={{ uri: pet.photo_url }} style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 0.75, borderColor: c.border }} />
+            ) : (
+              <View style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 0.75, borderColor: c.border, backgroundColor: c.cardInner, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 48 }}>🐾</Text>
+              </View>
+            )}
+            {editingHeader ? (
+              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.45)", borderBottomLeftRadius: 60, borderBottomRightRadius: 60, paddingVertical: 6, alignItems: "center" }}>
+                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>{uploadingPhoto ? "Uploading…" : "Change"}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
         </View>
+
+        {editingHeader ? (
+          <View style={{ marginTop: 18 }}>
+            <EditText label="Pet name *" value={hName} onChange={setHName} placeholder="e.g. Bella" />
+            <EditSelect label="Species *" value={hSpecies} onChange={setHSpecies} options={SPECIES_OPTIONS.map(s => ({ label: s, value: s }))} />
+            {hSpecies ? (
+              headerHasBreedList ? (
+                <>
+                  <EditSelect label={`${headerBreedLabel} *`} value={hBreedSelect} onChange={setHBreedSelect}
+                    options={[...headerBreedOptions.map(b => ({ label: b, value: b })), { label: OTHER_BREED_OPTION_LABEL, value: OTHER_LISTED_VALUE }]} />
+                  {hBreedSelect === OTHER_LISTED_VALUE ? (
+                    <EditText label={`${headerBreedLabel} (please specify) *`} value={hBreedCustom} onChange={setHBreedCustom} placeholder={`Enter ${headerBreedLabel.toLowerCase()}`} />
+                  ) : null}
+                </>
+              ) : (
+                <EditText label={`${headerBreedLabel} *`} value={hBreedCustom} onChange={(v) => { setHBreedCustom(v); setHBreedSelect(OTHER_LISTED_VALUE); }} placeholder={`Enter ${headerBreedLabel.toLowerCase()}`} />
+              )
+            ) : null}
+            <EditSelect label="Sex *" value={hSex} onChange={setHSex} options={SEX_OPTS.map(s => ({ label: s, value: s }))} />
+            <EditDate label="Date of birth *" value={hDob} onChange={setHDob} />
+            <EditNumberStepper label="Weight (kg)" value={hWeight} onChange={setHWeight} placeholder="e.g. 12.5" step={0.1} unit="kg" />
+          </View>
+        ) : (
+          <>
+            <Text style={{ fontSize: 26, fontWeight: "700", color: c.text, marginTop: 14, textAlign: "center" }}>{pet.name ?? "—"}</Text>
+            <Text style={{ fontSize: 15, color: c.subtext, marginTop: 2, textAlign: "center" }}>{[pet.species, pet.breed].filter(Boolean).join(" · ") || "—"}</Text>
+
+            {/* Stat tiles */}
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 16, alignSelf: "stretch" }}>
+              <View style={statTile}>
+                <Text style={statHead}>Sex</Text>
+                {(pet.sex && pet.sex.trim().split(/\s+/).length === 2
+                  ? pet.sex.trim().split(/\s+/)
+                  : [pet.sex || "—"]
+                ).map((line, i) => (
+                  <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
+                ))}
+              </View>
+              <View style={statTile}>
+                <Text style={statHead}>Age</Text>
+                {ageLines(ageDisplay).map((line, i) => (
+                  <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
+                ))}
+              </View>
+              <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}</Text></View>
+            </View>
+          </>
+        )}
 
         {/* Vet card + referral counts */}
         {practice?.name ? (

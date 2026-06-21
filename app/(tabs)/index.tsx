@@ -44,6 +44,12 @@ function formatAUPhone(raw: string | null): string {
   return raw.trim();
 }
 
+// Clean a URL for display only (strip scheme + trailing slash). Does not change the actual link.
+function formatWebsiteDisplay(url: string | null): string {
+  if (!url) return "";
+  return url.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
 function formatDate(iso: string | null) {
   if (!iso) return "—";
   try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return "—"; }
@@ -255,7 +261,7 @@ export default function HomeScreen() {
               ) : null}
               {practice.website ? (
                 <Text style={{ fontSize: 14, color: c.subtext, marginTop: 4 }}>
-                  Website: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(practice.website!.startsWith("http") ? practice.website! : `https://${practice.website}`)}>{practice.website}</Text>
+                  Website: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(practice.website!.startsWith("http") ? practice.website! : `https://${practice.website}`)}>{formatWebsiteDisplay(practice.website)}</Text>
                 </Text>
               ) : null}
               {!connectedPracticeId ? (

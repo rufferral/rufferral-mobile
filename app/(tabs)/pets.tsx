@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { PetGridTile, PetGridData } from "@/components/PetGridTile";
@@ -12,6 +13,7 @@ const ACTIVE_EXCLUDE = ["completed", "declined"];
 
 export default function PetsScreen() {
   const c = Colors.light;
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pets, setPets] = useState<PetGridData[]>([]);
@@ -44,26 +46,34 @@ export default function PetsScreen() {
 
   if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg, alignItems: "center", justifyContent: "center" }}><ActivityIndicator color="#ffffff" /></SafeAreaView>;
 
-  // Build rows of 2 for the grid.
-  const rows: PetGridData[][] = [];
-  for (let i = 0; i < pets.length; i += 2) rows.push(pets.slice(i, i + 2));
+  // Build a flat list of grid items: pet tiles plus a trailing "Add a pet" tile.
+  type GridItem = { kind: "pet"; pet: PetGridData } | { kind: "add" };
+  const items: GridItem[] = [...pets.map(p => ({ kind: "pet" as const, pet: p })), { kind: "add" as const }];
+  const rows: GridItem[][] = [];
+  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
+
+  const AddTile = () => (
+    <TouchableOpacity onPress={() => router.push("/pet/new")} activeOpacity={0.8}
+      style={{ flex: 1, minHeight: 180, borderRadius: 16, borderWidth: 1.5, borderColor: c.border, borderStyle: "dashed", backgroundColor: c.card, alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ fontSize: 34, color: c.subtext, fontWeight: "300", marginBottom: 4 }}>+</Text>
+      <Text style={{ fontSize: 14, color: c.subtext, fontWeight: "600" }}>Add a pet</Text>
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: c.text, marginBottom: 20 }}>My Pets</Text>
-        {pets.length === 0 ? (
-          <Text style={{ color: c.subtext, textAlign: "center", marginTop: 40 }}>No pets yet. Your pets appear automatically when your vet submits a referral.</Text>
-        ) : (
-          <View style={{ gap: 14 }}>
-            {rows.map((row, idx) => (
-              <View key={idx} style={{ flexDirection: "row", gap: 14 }}>
-                {row.map(pet => <PetGridTile key={pet.id} pet={pet} />)}
-                {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
-              </View>
-            ))}
-          </View>
-        )}
+        <View style={{ gap: 14 }}>
+          {rows.map((row, idx) => (
+            <View key={idx} style={{ flexDirection: "row", gap: 14 }}>
+              {row.map((item, i) => item.kind === "pet"
+                ? <PetGridTile key={item.pet.id} pet={item.pet} />
+                : <AddTile key="add-tile" />)}
+              {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
+            </View>
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
