@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { PetCard, PetCardData, CardReferral } from "@/components/PetCard";
@@ -16,11 +17,28 @@ function petEmbed(r: ReferralRow): PetEmbed | null {
 
 const PAST = ["completed", "declined"];
 
+// Fades + slides a child in on mount and whenever `trigger` changes (e.g. screen re-focus).
+function FadeInView({ delay = 0, trigger, style, children }: { delay?: number; trigger?: number; style?: any; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    opacity.setValue(0);
+    translateY.setValue(12);
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [trigger]);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
+}
+
 export default function ReferralsScreen() {
   const c = Colors.light;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activePets, setActivePets] = useState<PetCardData[]>([]);
+  const [focusTick, setFocusTick] = useState(0);
+  useFocusEffect(useCallback(() => { setFocusTick(t => t + 1); }, []));
   const [historyPets, setHistoryPets] = useState<PetCardData[]>([]);
 
   const load = useCallback(async () => {
@@ -81,7 +99,7 @@ export default function ReferralsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: c.text, marginBottom: 20 }}>Referrals</Text>
 
         {!hasAny ? (
@@ -91,13 +109,21 @@ export default function ReferralsScreen() {
             {activePets.length > 0 ? (
               <View style={{ marginBottom: 24 }}>
                 <Text style={sectionLabel}>Active ({activePets.reduce((n, p) => n + (p.referrals?.length ?? 0), 0)})</Text>
-                {activePets.map(pet => <PetCard key={pet.id} pet={pet} />)}
+                {activePets.map((pet, i) => (
+                  <FadeInView key={pet.id} delay={i * 110} trigger={focusTick}>
+                    <PetCard pet={pet} />
+                  </FadeInView>
+                ))}
               </View>
             ) : null}
             {historyPets.length > 0 ? (
               <View>
                 <Text style={sectionLabel}>History</Text>
-                {historyPets.map(pet => <PetCard key={pet.id} pet={pet} />)}
+                {historyPets.map((pet, i) => (
+                  <FadeInView key={pet.id} delay={(activePets.length + i) * 110} trigger={focusTick}>
+                    <PetCard pet={pet} />
+                  </FadeInView>
+                ))}
               </View>
             ) : null}
           </>

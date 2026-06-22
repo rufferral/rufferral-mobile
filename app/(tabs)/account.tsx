@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput, Share, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { SuburbAutocomplete, Suburb } from "@/components/SuburbAutocomplete";
@@ -52,8 +53,25 @@ function AutofilledField({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Fades + slides a child in on mount and whenever `trigger` changes (e.g. screen re-focus).
+function FadeInView({ delay = 0, trigger, style, children }: { delay?: number; trigger?: number; style?: any; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    opacity.setValue(0);
+    translateY.setValue(12);
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [trigger]);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
+}
+
 export default function AccountScreen() {
   const [loading, setLoading] = useState(true);
+  const [focusTick, setFocusTick] = useState(0);
+  useFocusEffect(useCallback(() => { setFocusTick(t => t + 1); }, []));
   const [profile, setProfile] = useState<ProfileRow | null>(null);
 
   const [editing, setEditing] = useState(false);
@@ -132,6 +150,16 @@ export default function AccountScreen() {
     setEditing(false);
   };
 
+  const handleShareApp = async () => {
+    try {
+      await Share.share({
+        message: "I'm using Rufferral to stay updated on my pet's vet referrals and care. Check it out: https://rufferral.com",
+      });
+    } catch {
+      // user dismissed or share failed — no action needed
+    }
+  };
+
   const handleSignOut = () => {
     Alert.alert("Log out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
@@ -159,11 +187,12 @@ export default function AccountScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={true}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={true}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: c.text, marginBottom: 20 }}>Account</Text>
 
         {/* Personal Details */}
-        <View style={cardStyle}>
+        <FadeInView delay={0} trigger={focusTick}>
+        <View style={[cardStyle, { marginBottom: 10 }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <Text style={[sectionLabel, { marginBottom: 0 }]}>Personal Details</Text>
             {editing ? (
@@ -221,19 +250,34 @@ export default function AccountScreen() {
             </>
           )}
         </View>
+        </FadeInView>
 
-        {/* Security */}
+        {/* Account actions — 2-column buttons */}
+        <View style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
+          <FadeInView delay={150} trigger={focusTick} style={{ flex: 1 }}>
+            <TouchableOpacity onPress={handleChangePassword} style={{ backgroundColor: c.card, borderRadius: 12, borderWidth: 0.75, borderColor: c.border, paddingVertical: 16, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>Change password</Text>
+            </TouchableOpacity>
+          </FadeInView>
+          <FadeInView delay={250} trigger={focusTick} style={{ flex: 1 }}>
+            <TouchableOpacity onPress={handleSignOut} style={{ backgroundColor: c.card, borderRadius: 12, borderWidth: 0.75, borderColor: c.border, paddingVertical: 16, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: "#ef4444" }}>Log out</Text>
+            </TouchableOpacity>
+          </FadeInView>
+        </View>
+
+        {/* Share Rufferral */}
+        <FadeInView delay={400} trigger={focusTick}>
         <View style={cardStyle}>
-          <Text style={sectionLabel}>Security</Text>
-          <TouchableOpacity onPress={handleChangePassword} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 0.75, borderBottomColor: c.border }}>
-            <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>Change password</Text>
-            <Text style={{ fontSize: 16, color: c.subtext }}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleSignOut} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12 }}>
-            <Text style={{ fontSize: 15, fontWeight: "600", color: "#ef4444" }}>Log out</Text>
-            <Text style={{ fontSize: 16, color: c.subtext }}>›</Text>
+          <Text style={sectionLabel}>Paw it forward</Text>
+          <Text style={{ fontSize: 14, color: c.subtext, marginBottom: 14, lineHeight: 20 }}>
+            Know someone who loves their pet as much as you do? Sharing Rufferral lets them stay in the loop with their pet's care.
+          </Text>
+          <TouchableOpacity onPress={handleShareApp} style={{ backgroundColor: "#10b981", borderRadius: 999, paddingVertical: 14, alignItems: "center" }}>
+            <Text style={{ color: "#ffffff", fontSize: 15, fontWeight: "700" }}>Share Rufferral</Text>
           </TouchableOpacity>
         </View>
+        </FadeInView>
 
       </ScrollView>
     </SafeAreaView>

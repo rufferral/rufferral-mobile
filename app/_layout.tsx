@@ -24,8 +24,7 @@ function useAuthGuard(session: Session | null, loading: boolean) {
 function RootContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [splashDone, setSplashDone] = useState(false);
-  const { dashboardReady } = useAppReady();
+  const { dashboardReady, splashDone, setSplashDone } = useAppReady();
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);

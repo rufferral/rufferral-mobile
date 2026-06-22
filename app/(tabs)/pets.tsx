@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, RefreshControl, ActivityIndicator, TouchableOpacity, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { PetGridTile, PetGridData } from "@/components/PetGridTile";
@@ -11,9 +11,26 @@ type ReferralRow = { id: string; status: string | null; pet_id: string | null; }
 
 const ACTIVE_EXCLUDE = ["completed", "declined"];
 
+// Fades + slides a child in on mount and whenever `trigger` changes (e.g. screen re-focus).
+function FadeInView({ delay = 0, trigger, style, children }: { delay?: number; trigger?: number; style?: any; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    opacity.setValue(0);
+    translateY.setValue(12);
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [trigger]);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
+}
+
 export default function PetsScreen() {
   const c = Colors.light;
   const router = useRouter();
+  const [focusTick, setFocusTick] = useState(0);
+  useFocusEffect(useCallback(() => { setFocusTick(t => t + 1); }, []));
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pets, setPets] = useState<PetGridData[]>([]);
@@ -62,14 +79,19 @@ export default function PetsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: c.text, marginBottom: 20 }}>My Pets</Text>
         <View style={{ gap: 14 }}>
           {rows.map((row, idx) => (
             <View key={idx} style={{ flexDirection: "row", gap: 14 }}>
-              {row.map((item, i) => item.kind === "pet"
-                ? <PetGridTile key={item.pet.id} pet={item.pet} />
-                : <AddTile key="add-tile" />)}
+              {row.map((item, i) => {
+                const seq = idx * 2 + i; // left-to-right, top-to-bottom order
+                return (
+                  <FadeInView key={item.kind === "pet" ? item.pet.id : "add-tile"} delay={seq * 120} trigger={focusTick} style={{ flex: 1 }}>
+                    {item.kind === "pet" ? <PetGridTile pet={item.pet} /> : <AddTile />}
+                  </FadeInView>
+                );
+              })}
               {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
             </View>
           ))}

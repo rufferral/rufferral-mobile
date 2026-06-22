@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Linking } from "react-native";
-import { useRouter } from "expo-router";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Linking, Animated, Easing } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
@@ -55,10 +55,31 @@ function formatDate(iso: string | null) {
   try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return "—"; }
 }
 
+// Fades + slides a child in once `ready` is true, and re-runs whenever `trigger` changes.
+// Stays invisible while not ready (so it can wait for the splash to finish on cold start).
+function FadeInView({ delay = 0, trigger, ready = true, style, children }: { delay?: number; trigger?: number; ready?: boolean; style?: any; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    if (!ready) { opacity.setValue(0); translateY.setValue(12); return; }
+    opacity.setValue(0);
+    translateY.setValue(12);
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 450, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [trigger, ready]);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const c = Colors.light;
-  const { setDashboardReady } = useAppReady();
+  const { setDashboardReady, splashDone } = useAppReady();
+  const [focusTick, setFocusTick] = useState(0);
+  useFocusEffect(useCallback(() => { setFocusTick(t => t + 1); }, []));
+  // Animation should start only once the splash has finished (cold start) and re-run on each focus.
+  const animateReady = splashDone;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [firstName, setFirstName] = useState("");
@@ -197,45 +218,51 @@ export default function HomeScreen() {
 
   const sectionLabel = { fontSize: 13, fontWeight: "700" as const, color: c.subtext, letterSpacing: 0.8, textTransform: "uppercase" as const, marginBottom: 12 };
   const linkRow = { backgroundColor: c.card, borderRadius: 12, borderWidth: 0.75, borderColor: c.border, padding: 16, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const };
+  const linkTile = { flex: 1, backgroundColor: c.card, borderRadius: 12, borderWidth: 0.75, borderColor: c.border, paddingVertical: 16, paddingHorizontal: 16, alignItems: "center" as const, justifyContent: "center" as const };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 24, fontWeight: "700", color: c.text, marginBottom: 4 }}>Welcome back, {firstName} 👋</Text>
         <Text style={{ fontSize: 14, color: c.subtext, marginBottom: 20 }}>{activeCount > 0 ? `${activeCount} active referral${activeCount > 1 ? "s" : ""}` : "No active referrals"}</Text>
 
         {/* Summary tiles */}
         <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
-          <Tile label="Active Referrals" value={String(activeCount)} />
-          <Tile label="Awaiting You" value={String(awaitingCount)} accent={awaitingCount > 0 ? "#f59e0b" : undefined} />
-          <Tile label={"Last\nUpdate"} value={formatDate(lastUpdate)} />
+          <FadeInView delay={0} trigger={focusTick} ready={animateReady} style={{ flex: 1 }}><Tile label="Active Referrals" value={String(activeCount)} /></FadeInView>
+          <FadeInView delay={100} trigger={focusTick} ready={animateReady} style={{ flex: 1 }}><Tile label="Awaiting You" value={String(awaitingCount)} accent={awaitingCount > 0 ? "#f59e0b" : undefined} /></FadeInView>
+          <FadeInView delay={200} trigger={focusTick} ready={animateReady} style={{ flex: 1 }}><Tile label={"Last\nUpdate"} value={formatDate(lastUpdate)} /></FadeInView>
         </View>
 
         {/* Most urgent referral */}
+        <FadeInView delay={350} trigger={focusTick} ready={animateReady}>
         {urgentPet ? (
-          <View style={{ marginBottom: 12 }}>
+          <View style={{ marginBottom: -2 }}>
             <Text style={sectionLabel}>Latest Update</Text>
             <PetCard pet={urgentPet} />
           </View>
         ) : (
-          <View style={{ marginBottom: 12, backgroundColor: c.card, borderRadius: 16, borderWidth: 0.75, borderColor: c.border, padding: 20, alignItems: "center" }}>
+          <View style={{ marginBottom: 10, backgroundColor: c.card, borderRadius: 16, borderWidth: 0.75, borderColor: c.border, padding: 20, alignItems: "center" }}>
             <Text style={{ fontSize: 15, color: c.subtext, textAlign: "center" }}>You're all caught up — no referrals need your attention right now.</Text>
           </View>
         )}
+        </FadeInView>
 
         {/* Quick links */}
-        <View style={{ gap: 10 }}>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/referrals")} style={linkRow}>
-            <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>View all referrals</Text>
-            <Text style={{ color: c.subtext, fontSize: 18 }}>→</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/pets")} style={linkRow}>
-            <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>My pets</Text>
-            <Text style={{ color: c.subtext, fontSize: 18 }}>→</Text>
-          </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <FadeInView delay={450} trigger={focusTick} ready={animateReady} style={{ flex: 1 }}>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/pets")} style={linkTile}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>My pets <Text style={{ color: c.subtext }}>→</Text></Text>
+            </TouchableOpacity>
+          </FadeInView>
+          <FadeInView delay={550} trigger={focusTick} ready={animateReady} style={{ flex: 1 }}>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/referrals")} style={linkTile}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>All referrals <Text style={{ color: c.subtext }}>→</Text></Text>
+            </TouchableOpacity>
+          </FadeInView>
         </View>
 
         {/* My Vet Clinic */}
+        <FadeInView delay={650} trigger={focusTick} ready={animateReady}>
         <View style={{ marginTop: 24 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <Text style={[sectionLabel, { marginBottom: 0 }]}>My Vet Clinic</Text>
@@ -274,6 +301,7 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
+        </FadeInView>
       </ScrollView>
       <VetConnectModal
         visible={editingVet}

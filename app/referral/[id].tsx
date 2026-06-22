@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Platform,
   UIManager,
   StyleSheet,
+  Animated,
+  Easing,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "@/lib/supabase";
@@ -244,6 +246,19 @@ function getOwnerStatusHeadline(status: string | null | undefined, activeIdx: nu
 // ── Small presentational helpers ───────────────────────────────────────────
 const W = (o: number) => `rgba(255,255,255,${o})`;
 
+// Fades + slides a child in on mount, after an optional delay. Used to stagger cards.
+function FadeInView({ delay = 0, children }: { delay?: number; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 500, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 500, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return <Animated.View style={{ opacity, transform: [{ translateY }] }}>{children}</Animated.View>;
+}
+
 function Label({ children }: { children: React.ReactNode }) {
   return <Text style={{ fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, color: W(0.45), marginBottom: 2 }}>{children}</Text>;
 }
@@ -258,6 +273,23 @@ function StatusSummaryCard({ referral, events, activeIdx, journeyComplete, speci
   const ownerEvents = useMemo(() => events.filter(e => e.event_type && OWNER_EVENT_TYPES.has(e.event_type)), [events]);
   const mostRecent = ownerEvents[0] ?? null;
   const progressPercent = Math.round((Math.min(activeIdx, JOURNEY_STEPS.length - 1) / (JOURNEY_STEPS.length - 1)) * 100);
+
+  // Animate the progress bar from 0 to its target width on mount.
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    progressAnim.setValue(0);
+    Animated.timing(progressAnim, {
+      toValue: progressPercent,
+      duration: 1500,
+      delay: 650,
+      easing: Easing.inOut(Easing.poly(4)),
+      useNativeDriver: false, // width can't use the native driver
+    }).start();
+  }, [progressPercent]);
+  const animatedWidth = progressAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: ["0%", "100%"],
+  });
 
   const stepTimestamps: (string | null)[] = JOURNEY_STEPS.map((_, stepIdx) => {
     if (stepIdx > activeIdx) return null;
@@ -290,7 +322,7 @@ function StatusSummaryCard({ referral, events, activeIdx, journeyComplete, speci
           {progressPercent === 100 ? <Text style={{ fontSize: 11, fontWeight: "600", color: W(0.4) }}>100%</Text> : null}
         </View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: W(0.1), overflow: "hidden", marginBottom: 16 }}>
-          <View style={{ height: "100%", borderRadius: 3, width: `${progressPercent}%`, backgroundColor: color }} />
+          <Animated.View style={{ height: "100%", borderRadius: 3, width: animatedWidth, backgroundColor: color }} />
         </View>
 
         {/* Headline */}
@@ -431,9 +463,12 @@ export default function ReferralTrackerScreen() {
       <Text style={{ fontSize: 22, fontWeight: "700", color: "#fff", textAlign: "center", marginBottom: 4 }}>{petName}&apos;s Referral</Text>
       <Text style={{ fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5, color: W(0.45), textAlign: "center", marginBottom: 20 }}>Submitted {formatSubmitted(referral.created_at)}</Text>
 
-      <StatusSummaryCard referral={referral} events={events} activeIdx={activeIdx} journeyComplete={journeyComplete} specialist={specialist} />
+      <FadeInView delay={0}>
+        <StatusSummaryCard referral={referral} events={events} activeIdx={activeIdx} journeyComplete={journeyComplete} specialist={specialist} />
+      </FadeInView>
 
       {/* Referral details */}
+      <FadeInView delay={2150}>
       <View style={[styles.card, { padding: 18, marginTop: 16 }]}>
         <Label>Referral details</Label>
         <View style={{ marginTop: 12, gap: 16 }}>
@@ -497,8 +532,10 @@ export default function ReferralTrackerScreen() {
           ) : null}
         </View>
       </View>
+      </FadeInView>
 
       {/* Follow us on Facebook card */}
+      <FadeInView delay={2550}>
       <View style={[styles.card, { padding: 18, marginTop: 16, alignItems: "center" }]}>
         <Text style={{ fontSize: 16, fontWeight: "700", color: "#fff", marginBottom: 8, textAlign: "center" }}>Follow us on Facebook</Text>
         <Text style={{ fontSize: 14, lineHeight: 20, color: W(0.7), textAlign: "center", marginBottom: 20 }}>
@@ -512,6 +549,7 @@ export default function ReferralTrackerScreen() {
           <Text style={{ fontSize: 15, fontWeight: "700", color: GREEN }}>Follow Rufferral →</Text>
         </TouchableOpacity>
       </View>
+      </FadeInView>
 
       {/* Rufferral wordmark */}
       <View style={{ alignItems: "center", marginTop: 24 }}>
