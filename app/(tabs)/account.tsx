@@ -271,7 +271,7 @@ export default function AccountScreen() {
         <View style={cardStyle}>
           <Text style={sectionLabel}>Paw it forward</Text>
           <Text style={{ fontSize: 14, color: c.subtext, marginBottom: 14, lineHeight: 20 }}>
-            Know someone who loves their pet as much as you do? Sharing Rufferral lets them stay in the loop with their pet's care.
+            Know someone who loves their pet as much as you do? Share Rufferral with them so they can stay in the loop with their pet's care too.
           </Text>
           <TouchableOpacity onPress={handleShareApp} style={{ backgroundColor: "#10b981", borderRadius: 999, paddingVertical: 14, alignItems: "center" }}>
             <Text style={{ color: "#ffffff", fontSize: 15, fontWeight: "700" }}>Share Rufferral</Text>

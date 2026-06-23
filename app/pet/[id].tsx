@@ -11,6 +11,8 @@ import {
   Keyboard,
   useColorScheme,
   StyleSheet,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
@@ -20,6 +22,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
+import { profileCompletion, completionColor } from "@/lib/profileCompletion";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditNumberStepper } from "@/components/EditFields";
@@ -106,6 +109,20 @@ function Field({ label, value, c }: { label: string; value: string | null | unde
   );
 }
 
+// Fades + slides a child up once `go` is true, after an optional delay. (native driver, no layout impact)
+function FadeIn({ go, delay = 0, style, children }: { go: boolean; delay?: number; style?: any; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    if (!go) { opacity.setValue(0); translateY.setValue(12); return; }
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 420, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 420, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [go]);
+  return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
+}
+
 export default function PetProfileScreen() {
   const params = useLocalSearchParams();
   const scrollRef = useRef<any>(null);
@@ -119,6 +136,11 @@ export default function PetProfileScreen() {
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing">("loading");
   const [pet, setPet] = useState<PetRow | null>(null);
+
+  // ── Intro fade cascade (opacity only; runs once after the pet loads) ──
+  const [tilesGo, setTilesGo] = useState(false); // stat tiles cascade
+  const [cardsGo, setCardsGo] = useState(false); // lower cards cascade
+  const introRan = useRef(false);
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([]);
   const [practice, setPractice] = useState<PracticeInfo | null>(null);
@@ -399,6 +421,19 @@ export default function PetProfileScreen() {
   }, [petId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
+
+  // Once the pet is loaded and content is ready, cascade the stat tiles in, then the lower cards.
+  useEffect(() => {
+    if (loadState === "ready" && pet && !introRan.current) {
+      introRan.current = true;
+      // rAF ensures the content has mounted/painted before we flip the fade flags.
+      const raf = requestAnimationFrame(() => {
+        setTilesGo(true);
+        setTimeout(() => setCardsGo(true), 450);
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [loadState, pet]);
   // When species changes during header editing, reset the breed selection.
   useEffect(() => {
     if (seedingHeader.current) { seedingHeader.current = false; return; } // skip reset on initial seed
@@ -438,6 +473,13 @@ export default function PetProfileScreen() {
         scrollEventThrottle={16}
         onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
       >
+
+      {/* Profile completion banner (full width, above the card) */}
+      {pet && !editingHeader && profileCompletion(pet) < 100 ? (
+        <View style={{ borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, marginBottom: 12, alignItems: "center", justifyContent: "center", backgroundColor: completionColor(profileCompletion(pet)) }}>
+          <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>{pet.name ?? "This pet"}'s profile is only {profileCompletion(pet)}% complete</Text>
+        </View>
+      ) : null}
 
       {/* Pet header card */}
       <View style={[card, { paddingVertical: 24 }]}>
@@ -499,60 +541,54 @@ export default function PetProfileScreen() {
             <Text style={{ fontSize: 26, fontWeight: "700", color: c.text, marginTop: 14, textAlign: "center" }}>{pet.name ?? "—"}</Text>
             <Text style={{ fontSize: 15, color: c.subtext, marginTop: 2, textAlign: "center" }}>{[pet.species, pet.breed].filter(Boolean).join(" · ") || "—"}</Text>
 
-            {/* Stat tiles */}
+            {/* Stat tiles — cascade in by opacity */}
             <View style={{ flexDirection: "row", gap: 8, marginTop: 16, alignSelf: "stretch" }}>
-              <View style={statTile}>
-                <Text style={statHead}>Sex</Text>
-                {(pet.sex && pet.sex.trim().split(/\s+/).length === 2
-                  ? pet.sex.trim().split(/\s+/)
-                  : [pet.sex || "—"]
-                ).map((line, i) => (
-                  <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
-                ))}
-              </View>
-              <View style={statTile}>
-                <Text style={statHead}>Age</Text>
-                {ageLines(ageDisplay).map((line, i) => (
-                  <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
-                ))}
-              </View>
-              <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}</Text></View>
+              <FadeIn go={tilesGo} delay={0} style={{ flex: 1 }}>
+                <View style={statTile}>
+                  <Text style={statHead}>Sex</Text>
+                  {(pet.sex && pet.sex.trim().split(/\s+/).length === 2
+                    ? pet.sex.trim().split(/\s+/)
+                    : [pet.sex || "—"]
+                  ).map((line, i) => (
+                    <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
+                  ))}
+                </View>
+              </FadeIn>
+              <FadeIn go={tilesGo} delay={120} style={{ flex: 1 }}>
+                <View style={statTile}>
+                  <Text style={statHead}>Age</Text>
+                  {ageLines(ageDisplay).map((line, i) => (
+                    <Text key={i} style={[statVal, i > 0 ? { marginTop: 0 } : null]}>{line}</Text>
+                  ))}
+                </View>
+              </FadeIn>
+              <FadeIn go={tilesGo} delay={240} style={{ flex: 1 }}>
+                <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}</Text></View>
+              </FadeIn>
             </View>
           </>
         )}
 
-        {/* Vet card + referral counts */}
+        {/* Referral counts */}
         {practice?.name ? (
           <View style={{ alignSelf: "stretch", marginTop: 16, gap: 8 }}>
-            <View style={{ backgroundColor: c.cardInner, borderRadius: 8, padding: 14 }}>
-              <Text style={{ fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4, color: c.muted, marginBottom: 8 }}>My Veterinarian</Text>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: c.text }}>{practice.name}</Text>
-              {practice.vet_name ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2 }}>{practice.vet_name}</Text> : null}
-              {practice.address ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 4 }}>{practice.address}</Text> : null}
-              {(practice.suburb || practice.state || practice.postcode) ? (
-                <Text style={{ fontSize: 14, color: c.subtext }}>{[practice.suburb, practice.state, practice.postcode].filter(Boolean).join(", ")}</Text>
-              ) : null}
-              {practice.phone ? (
-                <Text style={{ fontSize: 14, color: c.subtext, marginTop: 4 }}>
-                  Phone: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(`tel:${practice.phone!.replace(/\s/g, "")}`)}>{practice.phone}</Text>
-                </Text>
-              ) : null}
-              {practice.email ? (
-                <Text style={{ fontSize: 14, color: c.subtext }}>
-                  Email: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(`mailto:${practice.email}`)}>{practice.email}</Text>
-                </Text>
-              ) : null}
-            </View>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <View style={statTile}><Text style={statHead}>Total{"\n"}Referrals</Text><Text style={[statVal, { fontSize: 18, fontWeight: "700" }]}>{referrals.length}</Text></View>
-              <View style={statTile}><Text style={statHead}>Active{"\n"}Referrals</Text><Text style={[statVal, { fontSize: 18, fontWeight: "700" }]}>{activeReferrals.length}</Text></View>
-              <View style={statTile}><Text style={statHead}>Last{"\n"}Referral</Text><Text style={[statVal, { fontSize: 13, fontWeight: "700" }]}>{referrals[0]?.created_at ? formatDate(referrals[0].created_at) : "—"}</Text></View>
+              <FadeIn go={tilesGo} delay={360} style={{ flex: 1 }}>
+                <View style={statTile}><Text style={statHead}>Total{"\n"}Referrals</Text><Text style={[statVal, { fontSize: 18, fontWeight: "700" }]}>{referrals.length}</Text></View>
+              </FadeIn>
+              <FadeIn go={tilesGo} delay={440} style={{ flex: 1 }}>
+                <View style={statTile}><Text style={statHead}>Active{"\n"}Referrals</Text><Text style={[statVal, { fontSize: 18, fontWeight: "700" }]}>{activeReferrals.length}</Text></View>
+              </FadeIn>
+              <FadeIn go={tilesGo} delay={520} style={{ flex: 1 }}>
+                <View style={statTile}><Text style={statHead}>Last{"\n"}Referral</Text><Text style={[statVal, { fontSize: 13, fontWeight: "700" }]}>{referrals[0]?.created_at ? formatDate(referrals[0].created_at) : "—"}</Text></View>
+              </FadeIn>
             </View>
           </View>
         ) : null}
       </View>
 
       {/* Active Referrals */}
+      <FadeIn go={cardsGo} delay={0}>
       <View style={card}>
         <Text style={sectionHeading}>{activeReferrals.length > 0 ? `Active Referrals (${activeReferrals.length})` : "Active Referrals"}</Text>
         {activeReferrals.length === 0 ? (
@@ -578,9 +614,11 @@ export default function PetProfileScreen() {
           </View>
         )}
       </View>
+      </FadeIn>
 
       {/* Referral History */}
       {pastReferrals.length > 0 ? (
+        <FadeIn go={cardsGo} delay={80}>
         <View style={card}>
           <Text style={sectionHeading}>Referral History</Text>
           <View style={{ gap: 10 }}>
@@ -602,9 +640,11 @@ export default function PetProfileScreen() {
             ))}
           </View>
         </View>
+        </FadeIn>
       ) : null}
 
       {/* Pet Details */}
+      <FadeIn go={cardsGo} delay={160}>
       <View style={card}>
         <Text style={sectionHeading}>Pet Details</Text>
         <View style={{ flexDirection: "row", gap: 16 }}>
@@ -620,8 +660,10 @@ export default function PetProfileScreen() {
           </View>
         </View>
       </View>
+      </FadeIn>
 
       {/* Health & Medical */}
+      <FadeIn go={cardsGo} delay={240}>
       <View style={card}>
         <EditCardHeader
           title="Health & Medical"
@@ -669,8 +711,10 @@ export default function PetProfileScreen() {
           </>
         )}
       </View>
+      </FadeIn>
 
       {/* Nutrition & Diet */}
+      <FadeIn go={cardsGo} delay={320}>
       <View style={card}>
         <EditCardHeader
           title="Nutrition & Diet"
@@ -724,8 +768,10 @@ export default function PetProfileScreen() {
           </View>
         )}
       </View>
+      </FadeIn>
 
       {/* Lifestyle & Exercise */}
+      <FadeIn go={cardsGo} delay={400}>
       <View style={card}>
         <EditCardHeader
           title="Lifestyle & Exercise"
@@ -768,18 +814,26 @@ export default function PetProfileScreen() {
           </>
         ) : (
           <>
-            <Field label="Daily exercise (minutes)" value={pet.exercise_duration_mins != null ? `${pet.exercise_duration_mins} mins` : null} c={c} />
+            <View style={{ flexDirection: "row", gap: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Field label="Daily exercise (minutes)" value={pet.exercise_duration_mins != null ? `${pet.exercise_duration_mins} mins` : null} c={c} />
+                <Field label="Backyard access" value={pet.backyard_access === true ? "Yes" : pet.backyard_access === false ? "No" : null} c={c} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label="Living situation" value={pet.living_situation} c={c} />
+                <Field label="Training level" value={pet.training_level} c={c} />
+              </View>
+            </View>
             <Field label="Exercise types" value={pet.exercise_types} c={c} />
-            <Field label="Living situation" value={pet.living_situation} c={c} />
-            <Field label="Backyard access" value={pet.backyard_access === true ? "Yes" : pet.backyard_access === false ? "No" : null} c={c} />
-            <Field label="Training level" value={pet.training_level} c={c} />
             <Field label="Temperament" value={pet.temperament} c={c} />
             <Field label="Other pets in household" value={pet.other_pets} c={c} />
           </>
         )}
       </View>
+      </FadeIn>
 
       {/* Ownership */}
+      <FadeIn go={cardsGo} delay={480}>
       <View style={card}>
         <EditCardHeader
           title="Ownership"
@@ -831,8 +885,10 @@ export default function PetProfileScreen() {
           </>
         )}
       </View>
+      </FadeIn>
 
       {/* Prescriptions */}
+      <FadeIn go={cardsGo} delay={560}>
       <View style={card}>
         <Text style={sectionHeading}>Prescriptions</Text>
         {prescriptions.length === 0 ? (
@@ -879,6 +935,7 @@ export default function PetProfileScreen() {
           </View>
         )}
       </View>
+      </FadeIn>
 
     </KeyboardAwareScrollView>
     </View>

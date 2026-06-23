@@ -7,8 +7,10 @@ import { Colors } from "@/constants/colors";
 import { PetCard, PetCardData, CardReferral } from "@/components/PetCard";
 import { registerForPushNotifications } from "@/lib/notifications";
 import { useAppReady } from "@/context/AppReadyContext";
+import { profileCompletion } from "@/lib/profileCompletion";
 import { EventLike, activeStepIndex } from "@/lib/referralProgress";
 import { VetConnectModal } from "@/components/VetConnectModal";
+import { DidYouKnowCard } from "@/components/DidYouKnowCard";
 
 type PetEmbed = { id: string; name: string | null; species: string | null; breed: string | null; date_of_birth: string | null; photo_url: string | null; };
 type ReferralRow = { id: string; status: string | null; speciality_needed: string | null; created_at: string; pet_id: string | null; pets: PetEmbed | PetEmbed[] | null; };
@@ -77,6 +79,7 @@ export default function HomeScreen() {
   const c = Colors.light;
   const { setDashboardReady, splashDone } = useAppReady();
   const [focusTick, setFocusTick] = useState(0);
+  const [scrollLocked, setScrollLocked] = useState(false);
   useFocusEffect(useCallback(() => { setFocusTick(t => t + 1); }, []));
   // Animation should start only once the splash has finished (cold start) and re-run on each focus.
   const animateReady = splashDone;
@@ -84,6 +87,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [activeCount, setActiveCount] = useState(0);
+  const [incompleteCount, setIncompleteCount] = useState(0);
   const [awaitingCount, setAwaitingCount] = useState(0);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [urgentPet, setUrgentPet] = useState<PetCardData | null>(null);
@@ -98,6 +102,10 @@ export default function HomeScreen() {
     setUserId(user.id);
 
     const { data: profile } = await supabase.from("profiles").select("full_name, email").eq("id", user.id).maybeSingle();
+
+    // Count pets whose profile is less than 100% complete.
+    const { data: allPets } = await supabase.from("pets").select("*").eq("owner_id", user.id);
+    setIncompleteCount((allPets ?? []).filter((p: Record<string, unknown>) => profileCompletion(p) < 100).length);
     const p = profile as { full_name?: string | null; email?: string | null } | null;
     const name = p?.full_name?.trim() ?? p?.email?.trim() ?? "";
     setFirstName(name.split(" ")[0] ?? "there");
@@ -222,9 +230,18 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
+      <ScrollView scrollEnabled={!scrollLocked} contentContainerStyle={{ padding: 20, paddingBottom: 110 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}>
         <Text style={{ fontSize: 24, fontWeight: "700", color: c.text, marginBottom: 4 }}>Welcome back, {firstName} 👋</Text>
-        <Text style={{ fontSize: 14, color: c.subtext, marginBottom: 20 }}>{activeCount > 0 ? `${activeCount} active referral${activeCount > 1 ? "s" : ""}` : "No active referrals"}</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <Text onPress={() => router.push("/(tabs)/referrals")} style={{ fontSize: 14, color: c.subtext }}>
+            {activeCount > 0 ? `${activeCount} active referral${activeCount > 1 ? "s" : ""}` : "No active referrals"} <Text style={{ color: c.subtext }}>→</Text>
+          </Text>
+          {incompleteCount > 0 ? (
+            <Text onPress={() => router.push("/(tabs)/pets")} style={{ fontSize: 14, color: c.subtext }}>
+              {incompleteCount} pet profile{incompleteCount > 1 ? "s" : ""} incomplete <Text style={{ color: c.subtext }}>→</Text>
+            </Text>
+          ) : null}
+        </View>
 
         {/* Summary tiles */}
         <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
@@ -272,7 +289,7 @@ export default function HomeScreen() {
           </View>
           {practice?.name ? (
             <View style={{ backgroundColor: c.card, borderRadius: 12, borderWidth: 0.75, borderColor: c.border, padding: 16 }}>
-              {practice.name ? <Text style={{ fontSize: 17, fontWeight: "700", color: c.text }}>{practice.name}</Text> : null}
+              {practice.name ? <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{practice.name}</Text> : null}
               {practice.vet_name ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2 }}>{practice.vet_name}</Text> : null}
               {(practice.address || practice.suburb) ? (
                 <Text style={{ fontSize: 14, color: c.subtext, marginTop: 6 }}>
@@ -281,14 +298,15 @@ export default function HomeScreen() {
                     : [practice.suburb, practice.state, practice.postcode].filter(Boolean).join(" ")}
                 </Text>
               ) : null}
-              {practice.phone ? (
+              {(practice.phone || practice.website) ? (
                 <Text style={{ fontSize: 14, color: c.subtext, marginTop: 4 }}>
-                  Phone: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(`tel:${practice.phone!.replace(/\s/g, "")}`)}>{formatAUPhone(practice.phone)}</Text>
-                </Text>
-              ) : null}
-              {practice.website ? (
-                <Text style={{ fontSize: 14, color: c.subtext, marginTop: 4 }}>
-                  Website: <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(practice.website!.startsWith("http") ? practice.website! : `https://${practice.website}`)}>{formatWebsiteDisplay(practice.website)}</Text>
+                  {practice.phone ? (
+                    <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(`tel:${practice.phone!.replace(/\s/g, "")}`)}>{formatAUPhone(practice.phone)}</Text>
+                  ) : null}
+                  {practice.phone && practice.website ? <Text style={{ color: c.muted }}>{"  •  "}</Text> : null}
+                  {practice.website ? (
+                    <Text style={{ color: c.text, textDecorationLine: "underline" }} onPress={() => Linking.openURL(practice.website!.startsWith("http") ? practice.website! : `https://${practice.website}`)}>{formatWebsiteDisplay(practice.website)}</Text>
+                  ) : null}
                 </Text>
               ) : null}
               {!connectedPracticeId ? (
@@ -300,6 +318,13 @@ export default function HomeScreen() {
               <Text style={{ fontSize: 14, color: c.subtext }}>You haven't connected a vet clinic yet. Tap Connect to search and link your clinic so they can support your pet's care.</Text>
             </View>
           )}
+        </View>
+        </FadeInView>
+
+        {/* Did You Know carousel */}
+        <FadeInView delay={750} trigger={focusTick} ready={animateReady}>
+        <View style={{ marginTop: 14 }}>
+          <DidYouKnowCard onInteractingChange={setScrollLocked} />
         </View>
         </FadeInView>
       </ScrollView>

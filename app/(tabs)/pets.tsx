@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { PetGridTile, PetGridData } from "@/components/PetGridTile";
+import { profileCompletion } from "@/lib/profileCompletion";
 
 type PetRow = { id: string; name: string | null; species: string | null; breed: string | null; date_of_birth: string | null; photo_url: string | null; };
 type ReferralRow = { id: string; status: string | null; pet_id: string | null; };
@@ -39,7 +40,7 @@ export default function PetsScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: petData } = await supabase.from("pets").select("id, name, species, breed, date_of_birth, photo_url").eq("owner_id", user.id).order("created_at", { ascending: true });
+    const { data: petData } = await supabase.from("pets").select("*").eq("owner_id", user.id).order("created_at", { ascending: true });
     const petRows = (petData ?? []) as PetRow[];
 
     const { data: refData } = await supabase.from("referrals").select("id, status, pet_id").ilike("owner_email", user.email ?? "");
@@ -54,7 +55,7 @@ export default function PetsScreen() {
       else if (!ACTIVE_EXCLUDE.includes(s)) activeByPet[r.pet_id] = (activeByPet[r.pet_id] ?? 0) + 1;
     }
 
-    setPets(petRows.map(p => ({ ...p, activeCount: activeByPet[p.id] ?? 0, completedCount: completedByPet[p.id] ?? 0 })));
+    setPets(petRows.map(p => ({ ...p, activeCount: activeByPet[p.id] ?? 0, completedCount: completedByPet[p.id] ?? 0, completion: profileCompletion(p) })));
     setLoading(false);
   }, []);
 
