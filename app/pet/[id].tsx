@@ -26,6 +26,8 @@ import { profileCompletion, completionColor } from "@/lib/profileCompletion";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditNumberStepper } from "@/components/EditFields";
+import { SymptomTracker } from "@/components/SymptomTracker";
+import { HealthDocuments } from "@/components/HealthDocuments";
 import { BREED_OPTIONS, OTHER_LISTED_VALUE, OTHER_BREED_OPTION_LABEL } from "@/lib/breedOptions";
 
 const SPECIES_OPTIONS = ["Bird", "Cat", "Dog", "Fish", "Guinea Pig", "Horse", "Other", "Rabbit", "Reptile"];
@@ -469,6 +471,7 @@ export default function PetProfileScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
         enableOnAndroid={true}
+        enableResetScrollToCoords={false}
         extraScrollHeight={24}
         scrollEventThrottle={16}
         onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
@@ -710,7 +713,13 @@ export default function PetProfileScreen() {
             <Field label="Chronic conditions / diagnoses" value={pet.chronic_conditions} c={c} />
           </>
         )}
+        <HealthDocuments petId={petId} ownerId={pet.owner_id ?? ""} />
       </View>
+      </FadeIn>
+
+      {/* Symptom Tracker */}
+      <FadeIn go={cardsGo} delay={280} style={{ marginBottom: 16 }}>
+        <SymptomTracker petId={petId} ownerId={pet.owner_id ?? ""} />
       </FadeIn>
 
       {/* Nutrition & Diet */}
