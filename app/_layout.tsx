@@ -1,15 +1,15 @@
+import "react-native-gesture-handler";
 import "../global.css";
 import { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import AnimatedSplash from "@/components/AnimatedSplash";
 import { AppReadyProvider, useAppReady } from "@/context/AppReadyContext";
-
 SplashScreen.preventAutoHideAsync();
-
 function useAuthGuard(session: Session | null, loading: boolean) {
   const router = useRouter();
   const segments = useSegments();
@@ -20,7 +20,6 @@ function useAuthGuard(session: Session | null, loading: boolean) {
     else if (session && inAuthGroup) router.replace("/(tabs)");
   }, [session, loading, segments]);
 }
-
 function RootContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,11 +50,12 @@ function RootContent() {
     </>
   );
 }
-
 export default function RootLayout() {
   return (
-    <AppReadyProvider>
-      <RootContent />
-    </AppReadyProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppReadyProvider>
+        <RootContent />
+      </AppReadyProvider>
+    </GestureHandlerRootView>
   );
 }

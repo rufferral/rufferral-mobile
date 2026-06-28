@@ -11,6 +11,7 @@ import { profileCompletion } from "@/lib/profileCompletion";
 import { EventLike, activeStepIndex } from "@/lib/referralProgress";
 import { VetConnectModal } from "@/components/VetConnectModal";
 import { DidYouKnowCard } from "@/components/DidYouKnowCard";
+import { AdBannerCard } from "@/components/AdBannerCard";
 
 type PetEmbed = { id: string; name: string | null; species: string | null; breed: string | null; date_of_birth: string | null; photo_url: string | null; };
 type ReferralRow = { id: string; status: string | null; speciality_needed: string | null; created_at: string; pet_id: string | null; pets: PetEmbed | PetEmbed[] | null; };
@@ -325,6 +326,13 @@ export default function HomeScreen() {
         <FadeInView delay={750} trigger={focusTick} ready={animateReady}>
         <View style={{ marginTop: 14 }}>
           <DidYouKnowCard onInteractingChange={setScrollLocked} />
+        </View>
+        </FadeInView>
+
+        {/* Sponsored ad banner */}
+        <FadeInView delay={850} trigger={focusTick} ready={animateReady}>
+        <View style={{ marginTop: 24 }}>
+          <AdBannerCard onInteractingChange={setScrollLocked} />
         </View>
         </FadeInView>
       </ScrollView>

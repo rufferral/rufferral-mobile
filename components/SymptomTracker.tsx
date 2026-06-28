@@ -3,6 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, Alert, Acti
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
+import { ImageZoom } from "@likashefqet/react-native-image-zoom";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 
@@ -241,17 +243,27 @@ export function SymptomTracker({ petId, ownerId }: { petId: string; ownerId: str
 
       {/* Fullscreen photo viewer */}
       <Modal visible={viewerUrl !== null} transparent animationType="fade" onRequestClose={() => setViewerUrl(null)}>
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
-          {viewerUrl ? (
-            <Image source={{ uri: viewerUrl }} style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }} resizeMode="contain" />
-          ) : null}
-          <TouchableOpacity
-            onPress={() => setViewerUrl(null)}
-            style={{ position: "absolute", top: 56, right: 20, width: 38, height: 38, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" }}
-          >
-            <Text style={{ color: "#fff", fontSize: 22, fontWeight: "600", lineHeight: 24 }}>×</Text>
-          </TouchableOpacity>
-        </View>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
+            {viewerUrl ? (
+              <ImageZoom
+                uri={viewerUrl}
+                style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }}
+                resizeMode="contain"
+                minScale={1}
+                maxScale={5}
+                doubleTapScale={2.5}
+                isDoubleTapEnabled
+              />
+            ) : null}
+            <TouchableOpacity
+              onPress={() => setViewerUrl(null)}
+              style={{ position: "absolute", top: 56, right: 20, width: 38, height: 38, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" }}
+            >
+              <Text style={{ color: "#fff", fontSize: 22, fontWeight: "600", lineHeight: 24 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
   );
