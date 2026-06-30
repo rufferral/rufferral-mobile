@@ -64,7 +64,7 @@ export function PetCard({ pet }: { pet: PetCardData }) {
           </View>
         )}
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 17, fontWeight: "700", color: c.text }}>{pet.name ?? "—"}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ fontSize: 17, fontWeight: "700", color: c.text }}>{pet.name ?? "—"}</Text>
           <Text style={{ fontSize: 13, color: c.subtext, marginTop: 2 }}>{[pet.species, pet.breed].filter(Boolean).join(" · ") || "—"}</Text>
           {pet.date_of_birth ? <Text style={{ fontSize: 13, color: c.subtext, marginTop: 1 }}>Age: {calcAgeShort(pet.date_of_birth)}</Text> : null}
         </View>
