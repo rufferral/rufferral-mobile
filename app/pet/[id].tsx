@@ -37,16 +37,23 @@ import { INSURANCE_PROVIDERS } from "@/lib/insuranceProviders";
 // ── Types (ported from web) ────────────────────────────────────────────────
 type PetRow = {
   id: string; name: string | null; species: string | null; breed: string | null;
-  sex: string | null; age: string | null; weight_kg: number | null; date_of_birth: string | null;
+  sex: string | null; age: string | null; date_of_birth: string | null;
   photo_url: string | null; owner_id: string | null; microchip_number: string | null;
   food_brand: string | null; food_type: string | null; food_amount_grams: number | null;
   feeding_frequency: number | null; treats: string | null; supplements: string | null;
   food_sensitivities: string | null; exercise_duration_mins: number | null;
   exercise_types: string | null; living_situation: string | null; backyard_access: boolean | null;
   other_pets: string | null; temperament: string | null; training_level: string | null;
-  known_allergies: string | null; chronic_conditions: string | null;
-  vaccination_status: string | null; last_vaccinated: string | null; desexed_date: string | null;
+  vaccination_status: string | null; desexed_date: string | null;
   acquisition_source: string | null; insurance_provider: string | null; insurance_policy_number: string | null;
+};
+
+// Derived clinical values, read from the event tables (not columns on pets).
+type ClinicalDerived = {
+  latestWeightKg: number | null;
+  conditions: { id: string; display_text: string }[];   // category = 'diagnosis'
+  allergies: { id: string; display_text: string }[];     // category = 'allergy'
+  lastVaccinatedAt: string | null;                        // latest pet_vaccinations.administered_at
 };
 
 type ReferralRow = {
@@ -138,6 +145,7 @@ export default function PetProfileScreen() {
 
   const [loadState, setLoadState] = useState<"loading" | "ready" | "missing">("loading");
   const [pet, setPet] = useState<PetRow | null>(null);
+  const [clinical, setClinical] = useState<ClinicalDerived>({ latestWeightKg: null, conditions: [], allergies: [], lastVaccinatedAt: null });
 
   // ── Intro fade cascade (opacity only; runs once after the pet loads) ──
   const [tilesGo, setTilesGo] = useState(false); // stat tiles cascade
@@ -172,7 +180,7 @@ export default function PetProfileScreen() {
     }
     setHSex(p.sex ?? "");
     setHDob(p.date_of_birth?.split("T")[0] ?? "");
-    setHWeight(p.weight_kg != null ? String(p.weight_kg) : "");
+    setHWeight(clinical.latestWeightKg != null ? String(clinical.latestWeightKg) : "");
   };
 
   const headerBreedOptions = BREED_OPTIONS[hSpecies] ?? [];
@@ -189,11 +197,25 @@ export default function PetProfileScreen() {
       breed: headerResolvedBreed() || null,
       sex: hSex || null,
       date_of_birth: hDob || null,
-      weight_kg: hWeight ? parseFloat(hWeight) : null,
     };
     const { error } = await supabase.from("pets").update(fields).eq("id", petId);
+    if (error) { setSavingHeader(false); Alert.alert("Couldn't save", error.message); return; }
+
+    // Weight is longitudinal: if it changed, record a NEW dated observation (don't overwrite).
+    const newWeight = hWeight ? parseFloat(hWeight) : null;
+    if (newWeight != null && newWeight > 0 && newWeight !== clinical.latestWeightKg) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from("pet_weights").insert({
+        pet_id: petId,
+        owner_id: user?.id ?? pet?.owner_id,
+        weight_kg: newWeight,
+        recorded_at: new Date().toISOString(),
+        source: "owner",
+        confidence: "reported",
+      });
+      setClinical(prev => ({ ...prev, latestWeightKg: newWeight }));
+    }
     setSavingHeader(false);
-    if (error) { Alert.alert("Couldn't save", error.message); return; }
     setPet(prev => prev ? { ...prev, ...fields } as PetRow : prev);
     setEditingHeader(false);
   };
@@ -233,27 +255,22 @@ export default function PetProfileScreen() {
   const [hVaccinationStatus, setHVaccinationStatus] = useState("");
   const [hLastVaccinated, setHLastVaccinated] = useState("");
   const [hDesexedDate, setHDesexedDate] = useState("");
-  const [hAllergies, setHAllergies] = useState("");
-  const [hChronic, setHChronic] = useState("");
 
   const seedHealthFields = (p: PetRow) => {
     setHMicrochip(p.microchip_number ?? "");
     setHVaccinationStatus(p.vaccination_status ?? "");
-    setHLastVaccinated(p.last_vaccinated?.split("T")[0] ?? "");
+    setHLastVaccinated(clinical.lastVaccinatedAt?.split("T")[0] ?? "");
     setHDesexedDate(p.desexed_date?.split("T")[0] ?? "");
-    setHAllergies(p.known_allergies ?? "");
-    setHChronic(p.chronic_conditions ?? "");
   };
 
   const saveHealth = async () => {
     setSavingHealth(true);
+    // Only columns that still live on `pets`. Allergies/conditions/vaccination dates
+    // are event-table data (read-only in this pass; full editing comes later with codes).
     const fields = {
       microchip_number: hMicrochip || null,
       vaccination_status: hVaccinationStatus || null,
-      last_vaccinated: hLastVaccinated || null,
       desexed_date: hDesexedDate || null,
-      known_allergies: hAllergies || null,
-      chronic_conditions: hChronic || null,
     };
     const { error } = await supabase.from("pets").update(fields).eq("id", petId);
     setSavingHealth(false);
@@ -389,6 +406,20 @@ export default function PetProfileScreen() {
     if (error || !petData) { setLoadState("missing"); return; }
     setPet(petData as PetRow);
 
+    // Derived clinical values from event tables (latest weight, conditions, allergies, last vaccination)
+    const [wRes, cRes, vRes] = await Promise.all([
+      supabase.from("pet_weights").select("weight_kg, recorded_at").eq("pet_id", petId).order("recorded_at", { ascending: false }).limit(1),
+      supabase.from("pet_conditions").select("id, display_text, category, status").eq("pet_id", petId).neq("status", "resolved").order("recorded_at", { ascending: false }),
+      supabase.from("pet_vaccinations").select("administered_at").eq("pet_id", petId).not("administered_at", "is", null).order("administered_at", { ascending: false }).limit(1),
+    ]);
+    const conds = (cRes.data ?? []) as { id: string; display_text: string; category: string | null }[];
+    setClinical({
+      latestWeightKg: (wRes.data?.[0] as { weight_kg?: number } | undefined)?.weight_kg ?? null,
+      conditions: conds.filter(r => r.category !== "allergy").map(r => ({ id: r.id, display_text: r.display_text })),
+      allergies: conds.filter(r => r.category === "allergy").map(r => ({ id: r.id, display_text: r.display_text })),
+      lastVaccinatedAt: (vRes.data?.[0] as { administered_at?: string } | undefined)?.administered_at ?? null,
+    });
+
     const { data: refData } = await supabase.from("referrals")
       .select("id, status, speciality_needed, urgency, created_at, preferred_clinic")
       .eq("pet_id", petId).order("created_at", { ascending: false });
@@ -478,11 +509,18 @@ export default function PetProfileScreen() {
       >
 
       {/* Profile completion banner (full width, above the card) */}
-      {pet && !editingHeader && profileCompletion(pet) < 100 ? (
-        <View style={{ borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, marginBottom: 12, alignItems: "center", justifyContent: "center", backgroundColor: completionColor(profileCompletion(pet)) }}>
-          <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>{pet.name ?? "This pet"}'s profile is only {profileCompletion(pet)}% complete</Text>
-        </View>
-      ) : null}
+      {pet && !editingHeader ? (() => {
+        const pct = profileCompletion(pet, {
+          hasWeight: clinical.latestWeightKg != null,
+          hasAllergies: clinical.allergies.length > 0,
+          hasConditions: clinical.conditions.length > 0,
+        });
+        return pct < 100 ? (
+          <View style={{ borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, marginBottom: 12, alignItems: "center", justifyContent: "center", backgroundColor: completionColor(pct) }}>
+            <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>{pet.name ?? "This pet"}'s profile is only {pct}% complete</Text>
+          </View>
+        ) : null;
+      })() : null}
 
       {/* Pet header card */}
       <View style={[card, { paddingVertical: 24 }]}>
@@ -566,7 +604,7 @@ export default function PetProfileScreen() {
                 </View>
               </FadeIn>
               <FadeIn go={tilesGo} delay={240} style={{ flex: 1 }}>
-                <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{pet.weight_kg != null ? `${pet.weight_kg} kg` : "—"}</Text></View>
+                <View style={statTile}><Text style={statHead}>Weight</Text><Text style={statVal}>{clinical.latestWeightKg != null ? `${clinical.latestWeightKg} kg` : "—"}</Text></View>
               </FadeIn>
             </View>
           </>
@@ -659,7 +697,7 @@ export default function PetProfileScreen() {
           <View style={{ flex: 1 }}>
             <Field label="Sex" value={pet.sex} c={c} />
             <Field label="Date of birth" value={pet.date_of_birth ? formatDate(pet.date_of_birth) : null} c={c} />
-            <Field label="Weight" value={pet.weight_kg != null ? `${pet.weight_kg} kg` : null} c={c} />
+            <Field label="Weight" value={clinical.latestWeightKg != null ? `${clinical.latestWeightKg} kg` : null} c={c} />
           </View>
         </View>
       </View>
@@ -691,11 +729,8 @@ export default function PetProfileScreen() {
                     { label: "Unknown", value: "Unknown" },
                     { label: "Not vaccinated", value: "Not vaccinated" },
                   ]} />
-                <EditDate label="Last vaccinated" value={hLastVaccinated} onChange={setHLastVaccinated} />
               </View>
             </View>
-            <EditText label="Known allergies" value={hAllergies} onChange={setHAllergies} placeholder="e.g. Chicken, grass pollen" />
-            <EditText label="Chronic conditions / diagnoses" value={hChronic} onChange={setHChronic} placeholder="e.g. Epilepsy, hip dysplasia" />
           </>
         ) : (
           <>
@@ -706,11 +741,11 @@ export default function PetProfileScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Field label="Vaccination status" value={pet.vaccination_status} c={c} />
-                <Field label="Last vaccinated" value={pet.last_vaccinated ? formatDate(pet.last_vaccinated) : null} c={c} />
+                <Field label="Last vaccinated" value={clinical.lastVaccinatedAt ? formatDate(clinical.lastVaccinatedAt) : null} c={c} />
               </View>
             </View>
-            <Field label="Known allergies" value={pet.known_allergies} c={c} />
-            <Field label="Chronic conditions / diagnoses" value={pet.chronic_conditions} c={c} />
+            <Field label="Known allergies" value={clinical.allergies.length ? clinical.allergies.map(a => a.display_text).join(", ") : null} c={c} />
+            <Field label="Chronic conditions / diagnoses" value={clinical.conditions.length ? clinical.conditions.map(x => x.display_text).join(", ") : null} c={c} />
           </>
         )}
         <HealthDocuments petId={petId} ownerId={pet.owner_id ?? ""} />

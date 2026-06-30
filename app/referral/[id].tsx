@@ -44,7 +44,7 @@ const OWNER_EVENT_TYPES = new Set([
 ]);
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type PetEmbed = { id?: string | null; name?: string | null; species?: string | null; breed?: string | null; sex?: string | null; photo_url?: string | null; age?: string | null; weight_kg?: number | null; };
+type PetEmbed = { id?: string | null; name?: string | null; species?: string | null; breed?: string | null; sex?: string | null; photo_url?: string | null; age?: string | null; };
 type SpecialistClinicEmbed = { name?: string | null; phone?: string | null; email?: string | null; suburb?: string | null; state?: string | null; postcode?: string | null; address?: string | null; };
 type SpecialistEmbed = { clinic_name?: string | null; suburb?: string | null; state?: string | null; postcode?: string | null; address?: string | null; phone?: string | null; email?: string | null; specialist_clinics?: SpecialistClinicEmbed | SpecialistClinicEmbed[] | null; };
 type ProfileEmbed = { full_name?: string | null; email?: string | null; phone?: string | null; };
@@ -407,6 +407,7 @@ export default function ReferralTrackerScreen() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "notfound">("loading");
   const [referral, setReferral] = useState<ReferralRow | null>(null);
   const [events, setEvents] = useState<ReferralEventRow[]>([]);
+  const [latestWeightKg, setLatestWeightKg] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!referralId) { setLoadState("notfound"); return; }
@@ -422,6 +423,17 @@ export default function ReferralTrackerScreen() {
 
     const { data: evData } = await supabase.from("referral_events").select("*").eq("referral_id", referralId).order("created_at", { ascending: false });
     setEvents((evData ?? []) as ReferralEventRow[]);
+
+    // Latest weight now lives in pet_weights (not on pets). Fetch it for the summary line.
+    const petEmbed = unwrapOne((refData as ReferralRow).pets ?? null) as PetEmbed | null;
+    if (petEmbed?.id) {
+      const { data: wData } = await supabase.from("pet_weights")
+        .select("weight_kg").eq("pet_id", petEmbed.id)
+        .order("recorded_at", { ascending: false }).limit(1);
+      setLatestWeightKg((wData?.[0] as { weight_kg?: number } | undefined)?.weight_kg ?? null);
+    } else {
+      setLatestWeightKg(null);
+    }
     setLoadState("ready");
   }, [referralId]);
 
@@ -476,8 +488,8 @@ export default function ReferralTrackerScreen() {
             <Label>Pet</Label>
             <Text style={styles.value}>{[petName, pet?.species, pet?.breed].filter(Boolean).join(" · ")}</Text>
             {pet?.sex ? <Text style={styles.subValue}>{pet.sex}</Text> : null}
-            {[pet?.age, pet?.weight_kg != null ? `${pet.weight_kg} kg` : null].filter(Boolean).length > 0 ?
-              <Text style={styles.subValue}>{[pet?.age, pet?.weight_kg != null ? `${pet.weight_kg} kg` : null].filter(Boolean).join(" · ")}</Text> : null}
+            {[pet?.age, latestWeightKg != null ? `${latestWeightKg} kg` : null].filter(Boolean).length > 0 ?
+              <Text style={styles.subValue}>{[pet?.age, latestWeightKg != null ? `${latestWeightKg} kg` : null].filter(Boolean).join(" · ")}</Text> : null}
           </View>
 
           <View>

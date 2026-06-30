@@ -74,11 +74,22 @@ export default function NewPetScreen() {
         breed: resolvedBreed() || null,
         sex: sex || null,
         date_of_birth: dob || null,
-        weight_kg: weight ? parseFloat(weight) : null,
       }).select("id").single();
 
       if (petErr || !petData) throw petErr ?? new Error("Failed to create pet");
       const petId = (petData as { id: string }).id;
+
+      // Initial weight becomes the first longitudinal observation (not a column on pets).
+      if (weight && parseFloat(weight) > 0) {
+        await supabase.from("pet_weights").insert({
+          pet_id: petId,
+          owner_id: userId,
+          weight_kg: parseFloat(weight),
+          recorded_at: new Date().toISOString(),
+          source: "owner",
+          confidence: "reported",
+        });
+      }
 
       // Photo upload is best-effort — the pet is created regardless.
       if (photoUri) {

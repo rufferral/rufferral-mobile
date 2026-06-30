@@ -18,9 +18,10 @@ const BUCKET = "symptom-photos";
 type SymptomRow = {
   id: string;
   pet_id: string;
-  name: string;
+  display_text: string;      // the symptom name (coded fact's text)
   notes: string | null;
   photo_urls: string[] | null;
+  observed_at: string;       // when the symptom was observed (used for the timeline)
   created_at: string;
 };
 
@@ -50,10 +51,11 @@ export function SymptomTracker({ petId, ownerId }: { petId: string; ownerId: str
 
   const load = useCallback(async () => {
     const { data } = await supabase
-      .from("pet_symptoms")
+      .from("pet_observations")
       .select("*")
       .eq("pet_id", petId)
-      .order("created_at", { ascending: false });
+      .eq("kind", "symptom")
+      .order("observed_at", { ascending: false });
     setSymptoms((data ?? []) as SymptomRow[]);
     setLoading(false);
   }, [petId]);
@@ -107,8 +109,18 @@ export function SymptomTracker({ petId, ownerId }: { petId: string; ownerId: str
         const url = await uploadOne(uri);
         if (url) urls.push(url);
       }
-      const { error } = await supabase.from("pet_symptoms").insert({
-        pet_id: petId, owner_id: ownerId, name: name.trim(), notes: notes.trim() || null, photo_urls: urls,
+      const { error } = await supabase.from("pet_observations").insert({
+        pet_id: petId,
+        owner_id: ownerId,
+        kind: "symptom",
+        display_text: name.trim(),     // owner's symptom name; code backfilled later
+        code_system: null,
+        code: null,
+        notes: notes.trim() || null,
+        photo_urls: urls,
+        observed_at: new Date().toISOString(),
+        source: "owner",
+        confidence: "reported",
       });
       if (error) { Alert.alert("Couldn't save", error.message); setSaving(false); return; }
       resetForm();
@@ -205,8 +217,8 @@ export function SymptomTracker({ petId, ownerId }: { petId: string; ownerId: str
                       </View>
                       {/* Content (carries the inter-entry gap as paddingBottom so the column stretches through it) */}
                       <View style={{ flex: 1, paddingBottom: isLast ? 0 : 18 }}>
-                        <Text style={{ fontSize: 11, color: c.muted, marginBottom: 2 }}>{formatDate(s.created_at)}</Text>
-                        <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{s.name}</Text>
+                        <Text style={{ fontSize: 11, color: c.muted, marginBottom: 2 }}>{formatDate(s.observed_at)}</Text>
+                        <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{s.display_text}</Text>
                         {s.notes ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2, lineHeight: 20 }}>{s.notes}</Text> : null}
                         {s.photo_urls && s.photo_urls.length > 0 ? (
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>

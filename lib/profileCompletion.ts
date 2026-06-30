@@ -4,11 +4,10 @@
 // Every field that counts toward completion. Keep this in sync with the editable
 // fields on the add-pet form and the four pet-profile cards.
 export const PROFILE_FIELDS = [
-  // Identity
-  "name", "species", "breed", "sex", "date_of_birth", "weight_kg", "photo_url",
-  // Health & Medical
-  "vaccination_status", "microchip_number", "desexed_date", "known_allergies",
-  "chronic_conditions", "medication_name",
+  // Identity (weight is now event-table; counted via derived flag below)
+  "name", "species", "breed", "sex", "date_of_birth", "photo_url",
+  // Health & Medical (allergies/conditions are now event-table; counted via derived flags)
+  "vaccination_status", "microchip_number", "desexed_date", "medication_name",
   // Nutrition & Diet
   "food_type", "food_brand", "food_amount_grams", "food_sensitivities",
   // Lifestyle & Exercise
@@ -17,6 +16,16 @@ export const PROFILE_FIELDS = [
   // Ownership
   "acquisition_source", "insurance_provider", "notes",
 ] as const;
+
+// Clinical values that now live in event tables, supplied as derived flags so they
+// still count toward completion. Keeps the total field count stable (was 26, still 26:
+// 23 pets fields above + these 3).
+export type ClinicalCompletion = {
+  hasWeight?: boolean;
+  hasAllergies?: boolean;
+  hasConditions?: boolean;
+};
+const DERIVED_CLINICAL_COUNT = 3;
 
 export type CompletionFields = Record<string, unknown>;
 
@@ -31,13 +40,17 @@ function isFilled(value: unknown): boolean {
 }
 
 // Returns an integer 0–100 for how many profile fields are filled.
-export function profileCompletion(pet: CompletionFields): number {
-  const total = PROFILE_FIELDS.length;
+// `clinical` supplies the event-table-derived flags (weight, allergies, conditions).
+export function profileCompletion(pet: CompletionFields, clinical?: ClinicalCompletion): number {
+  const total = PROFILE_FIELDS.length + DERIVED_CLINICAL_COUNT;
   if (total === 0) return 100;
   let filled = 0;
   for (const field of PROFILE_FIELDS) {
     if (isFilled(pet[field])) filled++;
   }
+  if (clinical?.hasWeight) filled++;
+  if (clinical?.hasAllergies) filled++;
+  if (clinical?.hasConditions) filled++;
   return Math.round((filled / total) * 100);
 }
 
