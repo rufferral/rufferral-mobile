@@ -27,6 +27,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditNumberStepper } from "@/components/EditFields";
 import { SymptomTracker } from "@/components/SymptomTracker";
+import { PetTimeline } from "@/components/PetTimeline";
 import { HealthDocuments } from "@/components/HealthDocuments";
 import { BREED_OPTIONS, OTHER_LISTED_VALUE, OTHER_BREED_OPTION_LABEL } from "@/lib/breedOptions";
 
@@ -628,8 +629,13 @@ export default function PetProfileScreen() {
         ) : null}
       </View>
 
+      {/* Lifetime Timeline — the longitudinal record (hero feature) */}
+      <FadeIn go={cardsGo} delay={0} style={{ marginBottom: 16 }}>
+        <PetTimeline petId={petId} ownerId={pet.owner_id ?? ""} dateOfBirth={pet.date_of_birth} />
+      </FadeIn>
+
       {/* Active Referrals */}
-      <FadeIn go={cardsGo} delay={0}>
+      <FadeIn go={cardsGo} delay={80}>
       <View style={card}>
         <Text style={sectionHeading}>{activeReferrals.length > 0 ? `Active Referrals (${activeReferrals.length})` : "Active Referrals"}</Text>
         {activeReferrals.length === 0 ? (
