@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback } from "react";
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, ActivityIndicator, Modal, Dimensions, LayoutAnimation, Platform, UIManager, Alert } from "react-native";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "expo-router";
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, ActivityIndicator, Modal, Dimensions, Animated, Easing, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
+import { ImageZoom } from "@likashefqet/react-native-image-zoom";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { EditDate } from "@/components/EditFields";
 import { loadPetTimeline, KIND_META, type TimelineEvent, type TimelineEventKind } from "@/lib/petTimeline";
-
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+import { TimelineIcon, HAS_SVG_ICON } from "@/components/TimelineIcon";
 
 const c = Colors.light;
 const COLLAPSED_COUNT = 6;
@@ -37,12 +37,22 @@ const ALL_KINDS: TimelineEventKind[] = ["weight", "symptom", "condition", "vacci
 const ADDABLE: TimelineEventKind[] = ["weight", "symptom", "condition", "vaccination", "medication"];
 const BUCKET = "symptom-photos";
 
-export function PetTimeline({ petId, ownerId, dateOfBirth }: { petId: string; ownerId: string; dateOfBirth?: string | null }) {
+export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: { petId: string; ownerId: string; dateOfBirth?: string | null; onRequestScrollTo?: (y: number) => void }) {
+  const router = useRouter();
+  const cardY = useRef(0);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<TimelineEventKind | null>(null); // null = all
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+
+  // Expand/collapse choreography.
+  //  Expand:   drawLine (line grows from last visible circle to tab) → grow (card) → fade-in rows
+  //  Collapse: fade-out rows together → shrink (card)
+  const [animPhase, setAnimPhase] = useState<"idle" | "drawing" | "growing" | "shrinking" | "fadingOut">("idle");
+  const drawAnim = useRef(new Animated.Value(0)).current;   // pre-grow line segment height 0→1
+  const rowsOpacity = useRef(new Animated.Value(1)).current; // 1=visible; animates to 0 on collapse fade-out
+  const DRAW_GAP = 48; // px: last visible circle → first reveal circle (with -15 margin into spacer)
 
   // Add-event state
   const [adding, setAdding] = useState(false);                 // panel open
@@ -141,10 +151,89 @@ export function PetTimeline({ petId, ownerId, dateOfBirth }: { petId: string; ow
   };
 
   const filtered = filter ? events.filter(e => e.kind === filter) : events;
-  const shown = expanded ? filtered : filtered.slice(0, COLLAPSED_COUNT);
+  const baseRows = filtered.slice(0, COLLAPSED_COUNT);
+  const revealRows = filtered.slice(COLLAPSED_COUNT);
+
+  // Renders a single timeline row. `showLine` controls the downward connector
+  // line. `animatedLine` makes it an animated draw (for the last visible row on expand).
+  const renderRow = (e: TimelineEvent, globalIdx: number, isLast: boolean, showLine?: boolean, animatedLine?: boolean) => {
+    const meta = KIND_META[e.kind];
+    const onCircle = meta.color === "#ffffff" ? Colors.brand : "#ffffff";
+    const drawLine = showLine !== undefined ? showLine : !isLast;
+    return (
+      <View key={e.id} style={{ flexDirection: "row", gap: 12 }}>
+        {/* Rail: glyph circle + connector line */}
+        <View style={{ width: 28, alignItems: "center" }}>
+          <View style={{ height: 15 }} />
+          <View style={{ height: 28, width: 28, borderRadius: 14, backgroundColor: meta.color, alignItems: "center", justifyContent: "center" }}>
+            {HAS_SVG_ICON[e.kind] ? (
+              <TimelineIcon kind={e.kind} size={28} color={onCircle} />
+            ) : (
+              <Text style={{ color: onCircle, fontSize: 14, fontWeight: "900" }}>{meta.glyph}</Text>
+            )}
+          </View>
+          {animatedLine ? (
+            <Animated.View pointerEvents="none" style={{
+              width: 1, backgroundColor: "rgba(255,255,255,0.2)", marginBottom: -15,
+              height: (expanded && animPhase !== "drawing")
+                ? DRAW_GAP
+                : drawAnim.interpolate({ inputRange: [0, 1], outputRange: [0, DRAW_GAP] }),
+            }} />
+          ) : drawLine ? (
+            <View style={{ flex: 1, width: 1, backgroundColor: "rgba(255,255,255,0.2)", marginBottom: -15 }} />
+          ) : null}
+        </View>
+        {/* Content */}
+        <View style={{ flex: 1, paddingBottom: isLast ? 0 : 18 }}>
+          <Text style={{ fontSize: 11, color: c.muted, marginBottom: 2 }}>
+            {formatDate(e.date)}
+            <Text style={{ color: meta.color === "#ffffff" ? c.subtext : meta.color }}>  ·  {meta.label}</Text>
+          </Text>
+          <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{e.title}</Text>
+          {e.subtitle ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2, lineHeight: 20 }}>{e.subtitle}</Text> : null}
+
+          {/* Referral: mini progress bar + navigate button */}
+          {e.kind === "referral" && e.referralId ? (
+            <View style={{ marginTop: 10 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: e.progressColor ?? c.subtext }}>{e.statusLabel ?? "In progress"}</Text>
+                <Text style={{ fontSize: 11, color: c.muted }}>{e.progressPercent ?? 0}%</Text>
+              </View>
+              <View style={{ height: 6, borderRadius: 999, backgroundColor: c.cardInner, overflow: "hidden" }}>
+                <View style={{ height: "100%", width: `${e.progressPercent ?? 0}%`, borderRadius: 999, backgroundColor: e.progressColor ?? Colors.brand }} />
+              </View>
+              <TouchableOpacity
+                onPress={() => router.push(`/referral/${e.referralId}`)}
+                activeOpacity={0.8}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 10, paddingVertical: 9, borderRadius: 10, borderWidth: 0.75, borderColor: c.border }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: "600", color: c.text }}>View referral journey</Text>
+                <Text style={{ fontSize: 13, color: c.subtext }}>→</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {e.photoUrls && e.photoUrls.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+              {e.photoUrls.map(url => (
+                <TouchableOpacity key={url} onPress={() => setViewerUrl(url)} activeOpacity={0.85}>
+                  <Image source={{ uri: url }} style={{ width: 72, height: 72, borderRadius: 8, marginRight: 8 }} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : null}
+          {e.source && e.source !== "owner" ? (
+            <Text style={{ fontSize: 11, color: Colors.brand, marginTop: 3, fontWeight: "600" }}>✓ Clinic-verified</Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
 
   return (
-    <View style={{ backgroundColor: c.card, borderRadius: 16, borderWidth: 0.75, borderColor: c.border, padding: 16 }}>
+    <View
+      onLayout={(e) => { cardY.current = e.nativeEvent.layout.y; }}
+      style={{ backgroundColor: c.card, borderRadius: 16, borderWidth: 0.75, borderColor: c.border, padding: 16 }}
+    >
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", minHeight: 28, marginBottom: 12 }}>
         <Text style={{ fontSize: 13, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, color: c.subtext }}>Lifetime Timeline</Text>
         {!adding ? (
@@ -166,7 +255,11 @@ export function PetTimeline({ petId, ownerId, dateOfBirth }: { petId: string; ow
                   <TouchableOpacity key={k} onPress={() => setAddKind(k)} activeOpacity={0.8}
                     style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
                     <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: KIND_META[k].color, alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ color: KIND_META[k].color === "#ffffff" ? Colors.brand : "#fff", fontSize: 11, fontWeight: "900" }}>{KIND_META[k].glyph}</Text>
+                      {HAS_SVG_ICON[k] ? (
+                        <TimelineIcon kind={k} size={20} color={KIND_META[k].color === "#ffffff" ? Colors.brand : "#fff"} />
+                      ) : (
+                        <Text style={{ color: KIND_META[k].color === "#ffffff" ? Colors.brand : "#fff", fontSize: 11, fontWeight: "900" }}>{KIND_META[k].glyph}</Text>
+                      )}
                     </View>
                     <Text style={{ fontSize: 13, fontWeight: "600", color: c.text }}>{KIND_META[k].label}</Text>
                   </TouchableOpacity>
@@ -211,50 +304,67 @@ export function PetTimeline({ petId, ownerId, dateOfBirth }: { petId: string; ow
         </Text>
       ) : (
         <View>
-          {shown.map((e, i) => {
-            const isLast = i === shown.length - 1;
-            const meta = KIND_META[e.kind];
-            const onCircle = meta.color === "#ffffff" ? Colors.brand : "#ffffff";
-            return (
-              <View key={e.id} style={{ flexDirection: "row", gap: 12 }}>
-                {/* Rail: glyph circle + connector line */}
-                <View style={{ width: 28, alignItems: "center" }}>
-                  <View style={{ height: 15 }} />
-                  <View style={{ height: 28, width: 28, borderRadius: 14, backgroundColor: meta.color, alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ color: onCircle, fontSize: 14, fontWeight: "900" }}>{meta.glyph}</Text>
-                  </View>
-                  {!isLast ? <View style={{ flex: 1, width: 1, backgroundColor: "rgba(255,255,255,0.2)", marginBottom: -15 }} /> : null}
-                </View>
-                {/* Content */}
-                <View style={{ flex: 1, paddingBottom: isLast ? 0 : 18 }}>
-                  <Text style={{ fontSize: 11, color: c.muted, marginBottom: 2 }}>
-                    {formatDate(e.date)}
-                    <Text style={{ color: meta.color === "#ffffff" ? c.subtext : meta.color }}>  ·  {meta.label}</Text>
-                  </Text>
-                  <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{e.title}</Text>
-                  {e.subtitle ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2, lineHeight: 20 }}>{e.subtitle}</Text> : null}
-                  {e.photoUrls && e.photoUrls.length > 0 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                      {e.photoUrls.map(url => (
-                        <TouchableOpacity key={url} onPress={() => setViewerUrl(url)} activeOpacity={0.85}>
-                          <Image source={{ uri: url }} style={{ width: 72, height: 72, borderRadius: 8, marginRight: 8 }} />
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  ) : null}
-                  {e.source && e.source !== "owner" ? (
-                    <Text style={{ fontSize: 11, color: Colors.brand, marginTop: 3, fontWeight: "600" }}>✓ Clinic-verified</Text>
-                  ) : null}
-                </View>
-              </View>
-            );
+          {/* Always-visible rows. Last base row's line shows only when expanded
+              (so it bridges into the reveal section, not into the Show-more tab). */}
+          {baseRows.map((e, i) => {
+            const isLastOverall = i === filtered.length - 1;
+            const isLastBase = i === baseRows.length - 1;
+            if (isLastBase && !isLastOverall) {
+              // Last visible row: its downward line is animated (draws to the tab on expand).
+              return renderRow(e, i, isLastOverall, false, true);
+            }
+            return renderRow(e, i, isLastOverall, !isLastOverall);
           })}
+
+          {/* Revealed rows inside a growing container. A continuous connector line
+              sits behind them (visible as the card grows); rows fade in on top. */}
+          {filtered.length > COLLAPSED_COUNT ? (
+            <RevealSection expanded={expanded}>
+              {/* Sync-fade layer: on collapse, all rows fade out together via rowsOpacity */}
+              <Animated.View style={{ opacity: rowsOpacity }}>
+                {revealRows.map((e, idx) => {
+                  const globalIdx = COLLAPSED_COUNT + idx;
+                  const isLastOverall = globalIdx === filtered.length - 1;
+                  return (
+                    <FadeInRow key={e.id} delay={Math.max(0, REVEAL_DURATION - 1000) + idx * 90} run={expanded}>
+                      {renderRow(e, globalIdx, isLastOverall, !isLastOverall)}
+                    </FadeInRow>
+                  );
+                })}
+              </Animated.View>
+            </RevealSection>
+          ) : null}
 
           {filtered.length > COLLAPSED_COUNT ? (
             <TouchableOpacity
-              onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setExpanded(o => !o); }}
+              onPress={() => {
+                if (animPhase !== "idle") return; // ignore taps mid-animation
+                if (!expanded) {
+                  // EXPAND: draw line (steady/linear) → grow starts just before draw ends → fade rows in
+                  setAnimPhase("drawing");
+                  drawAnim.setValue(0);
+                  Animated.timing(drawAnim, { toValue: 1, duration: 347, easing: Easing.linear, useNativeDriver: false }).start();
+                  setTimeout(() => {
+                    setExpanded(true);        // triggers RevealSection grow + row fade-in
+                    setAnimPhase("growing");
+                    setTimeout(() => setAnimPhase("idle"), REVEAL_DURATION);
+                  }, 295);
+                } else {
+                  // COLLAPSE: fade rows out IMMEDIATELY → shrink the instant fade completes
+                  setAnimPhase("fadingOut");
+                  drawAnim.setValue(0);       // retract the pre-grow line immediately
+                  Animated.timing(rowsOpacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(({ finished }) => {
+                    if (!finished) return;
+                    setExpanded(false);       // shrink begins the instant fade-out ends
+                    setAnimPhase("shrinking");
+                    // Track the view up so the card top is back on screen when the shrink ends.
+                    onRequestScrollTo?.(Math.max(0, cardY.current - 12));
+                    setTimeout(() => { rowsOpacity.setValue(1); setAnimPhase("idle"); }, REVEAL_DURATION + 50);
+                  });
+                }
+              }}
               activeOpacity={0.7}
-              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: -16, paddingHorizontal: 16, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)" }}
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: -16, paddingHorizontal: 16, marginTop: 7, paddingTop: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)" }}
             >
               <Text style={{ fontSize: 13, fontWeight: "600", color: c.subtext }}>
                 {expanded ? "Show less" : `Show ${filtered.length - COLLAPSED_COUNT} more`}
@@ -265,18 +375,70 @@ export function PetTimeline({ petId, ownerId, dateOfBirth }: { petId: string; ow
         </View>
       )}
 
-      {/* Fullscreen photo viewer */}
+      {/* Fullscreen photo viewer (pinch-to-zoom) */}
       <Modal visible={viewerUrl !== null} transparent animationType="fade" onRequestClose={() => setViewerUrl(null)}>
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
-          {viewerUrl ? (
-            <Image source={{ uri: viewerUrl }} style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }} resizeMode="contain" />
-          ) : null}
-          <TouchableOpacity onPress={() => setViewerUrl(null)} style={{ position: "absolute", top: 56, right: 20, width: 38, height: 38, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ color: "#fff", fontSize: 22, fontWeight: "600", lineHeight: 24 }}>×</Text>
-          </TouchableOpacity>
-        </View>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" }}>
+            {viewerUrl ? (
+              <ImageZoom
+                uri={viewerUrl}
+                style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8 }}
+                resizeMode="contain"
+                minScale={1}
+                maxScale={5}
+                doubleTapScale={2.5}
+                isDoubleTapEnabled
+              />
+            ) : null}
+            <TouchableOpacity onPress={() => setViewerUrl(null)} style={{ position: "absolute", top: 56, right: 20, width: 38, height: 38, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: "#fff", fontSize: 22, fontWeight: "600", lineHeight: 24 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
+  );
+}
+
+// Fades a row in (opacity 0→1, translateY 12→0). Animates whenever `run` is true,
+// including on first mount. `delay` sequences the cascade after the card grows.
+function FadeInRow({ delay = 0, run, children }: { delay?: number; run: boolean; children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
+  const anim = useRef<Animated.CompositeAnimation | null>(null);
+  useEffect(() => {
+    anim.current?.stop();
+    if (!run) { opacity.setValue(0); translateY.setValue(12); return; }
+    opacity.setValue(0); translateY.setValue(12);
+    anim.current = Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 420, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 420, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]);
+    anim.current.start();
+    return () => anim.current?.stop();
+  }, [run, delay]);
+  return <Animated.View style={{ opacity, transform: [{ translateY }] }}>{children}</Animated.View>;
+}
+
+// Reveal container. No measurement needed: animates maxHeight 0↔LARGE, which
+// clips/reveals the always-mounted children. Natural content height caps it, so
+// there's no race and the first expand works reliably.
+const REVEAL_DURATION = 1400;
+const REVEAL_MAX = 900; // ceiling for reveal section
+function RevealSection({ expanded, children }: { expanded: boolean; children: React.ReactNode }) {
+  const maxH = useRef(new Animated.Value(expanded ? REVEAL_MAX : 0)).current;
+  useEffect(() => {
+    Animated.timing(maxH, {
+      toValue: expanded ? REVEAL_MAX : 0,
+      duration: REVEAL_DURATION,
+      easing: Easing.inOut(Easing.poly(4)),
+      useNativeDriver: false,
+    }).start();
+  }, [expanded]);
+  return (
+    <Animated.View style={{ maxHeight: maxH, overflow: "hidden" }}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -311,7 +473,11 @@ function AddForm(p: AddFormProps) {
     <View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: meta.color, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: meta.color === "#ffffff" ? Colors.brand : "#fff", fontSize: 12, fontWeight: "900" }}>{meta.glyph}</Text>
+          {HAS_SVG_ICON[p.kind] ? (
+            <TimelineIcon kind={p.kind} size={22} color={meta.color === "#ffffff" ? Colors.brand : "#fff"} />
+          ) : (
+            <Text style={{ color: meta.color === "#ffffff" ? Colors.brand : "#fff", fontSize: 12, fontWeight: "900" }}>{meta.glyph}</Text>
+          )}
         </View>
         <Text style={{ fontSize: 14, fontWeight: "700", color: c.text }}>Add {meta.label.toLowerCase()}</Text>
       </View>

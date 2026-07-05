@@ -137,6 +137,25 @@ export default function PetProfileScreen() {
   const params = useLocalSearchParams();
   const scrollRef = useRef<any>(null);
   const scrollY = useRef(0); // tracks current scroll offset
+  const timelineY = useRef(0); // Y offset of the timeline card in the scroll content
+  const scrollAnimRef = useRef<any>(null);
+
+  // Smoothly animate the scroll offset to `targetY` over `duration`, matching the
+  // timeline card's shrink so the view tracks with it and ends with the card in view.
+  const smoothScrollTo = (targetY: number, duration: number) => {
+    const startY = scrollY.current;
+    const start = Date.now();
+    if (scrollAnimRef.current) clearInterval(scrollAnimRef.current);
+    // ease-in-out poly(4) to match the card animation
+    const ease = (t: number) => (t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2);
+    scrollAnimRef.current = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const t = Math.min(1, elapsed / duration);
+      const y = startY + (targetY - startY) * ease(t);
+      scrollRef.current?.scrollToPosition?.(0, y, false);
+      if (t >= 1 && scrollAnimRef.current) { clearInterval(scrollAnimRef.current); scrollAnimRef.current = null; }
+    }, 16);
+  };
   const ownershipY = useRef(0); // Y position of the Ownership card
   const router = useRouter();
   const petId = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
@@ -630,9 +649,11 @@ export default function PetProfileScreen() {
       </View>
 
       {/* Lifetime Timeline — the longitudinal record (hero feature) */}
-      <FadeIn go={cardsGo} delay={0} style={{ marginBottom: 16 }}>
-        <PetTimeline petId={petId} ownerId={pet.owner_id ?? ""} dateOfBirth={pet.date_of_birth} />
-      </FadeIn>
+      <View onLayout={(e) => { timelineY.current = e.nativeEvent.layout.y; }}>
+        <FadeIn go={cardsGo} delay={0} style={{ marginBottom: 16 }}>
+          <PetTimeline petId={petId} ownerId={pet.owner_id ?? ""} dateOfBirth={pet.date_of_birth} onRequestScrollTo={() => smoothScrollTo(Math.max(0, timelineY.current - 12), 1400)} />
+        </FadeIn>
+      </View>
 
       {/* Active Referrals */}
       <FadeIn go={cardsGo} delay={80}>
