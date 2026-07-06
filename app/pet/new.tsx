@@ -10,11 +10,11 @@ import { supabase } from "@/lib/supabase";
 import { Colors } from "@/constants/colors";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { EditText, EditDate, EditSelect, EditNumberStepper } from "@/components/EditFields";
-import { BREED_OPTIONS, OTHER_LISTED_VALUE, OTHER_BREED_OPTION_LABEL } from "@/lib/breedOptions";
+import { VenomCodePicker } from "@/components/VenomCodePicker";
+import { FRIENDLY_SPECIES, friendlySpeciesByLabel } from "@/lib/speciesMapping";
 
 const c = Colors.light;
 const PET_PHOTOS_BUCKET = "pet-photos";
-const SPECIES = ["Bird", "Cat", "Dog", "Fish", "Guinea Pig", "Horse", "Other", "Rabbit", "Reptile"];
 const SEX_OPTIONS = ["Female desexed", "Female intact", "Male neutered", "Male intact"];
 
 export default function NewPetScreen() {
@@ -24,8 +24,9 @@ export default function NewPetScreen() {
 
   const [name, setName] = useState("");
   const [species, setSpecies] = useState("");
-  const [breedSelect, setBreedSelect] = useState("");
-  const [breedCustom, setBreedCustom] = useState("");
+  const [speciesCode, setSpeciesCode] = useState("");
+  const [breed, setBreed] = useState("");
+  const [breedCode, setBreedCode] = useState("");
   const [sex, setSex] = useState("");
   const [dob, setDob] = useState("");
   const [weight, setWeight] = useState("");
@@ -37,13 +38,9 @@ export default function NewPetScreen() {
     });
   }, []);
 
-  // Reset breed when species changes
-  useEffect(() => { setBreedSelect(""); setBreedCustom(""); }, [species]);
-
-  const breedOptions = BREED_OPTIONS[species] ?? [];
-  const hasBreedList = breedOptions.length > 0;
+  const speciesInfo = friendlySpeciesByLabel(species);
+  const hasBreedList = !!speciesInfo?.hasBreeds;
   const breedLabel = species === "Fish" || species === "Bird" || species === "Reptile" ? "Species/Type" : "Breed";
-  const resolvedBreed = () => breedSelect === OTHER_LISTED_VALUE ? breedCustom.trim() : breedSelect.trim();
 
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -60,7 +57,7 @@ export default function NewPetScreen() {
   const handleSave = async () => {
     if (!name.trim()) { Alert.alert("Required", "Pet name is required."); return; }
     if (!species) { Alert.alert("Required", "Species is required."); return; }
-    if (!resolvedBreed()) { Alert.alert("Required", `${breedLabel} is required.`); return; }
+    if (!breed.trim()) { Alert.alert("Required", `${breedLabel} is required.`); return; }
     if (!sex) { Alert.alert("Required", "Sex is required."); return; }
     if (!dob) { Alert.alert("Required", "Date of birth is required."); return; }
     if (!userId) { Alert.alert("Not signed in", "Please sign in again."); return; }
@@ -71,7 +68,9 @@ export default function NewPetScreen() {
         owner_id: userId,
         name: name.trim(),
         species: species || null,
-        breed: resolvedBreed() || null,
+        species_code: speciesCode || null,
+        breed: breed.trim() || null,
+        breed_code: breedCode || null,
         sex: sex || null,
         date_of_birth: dob || null,
       }).select("id").single();
@@ -152,20 +151,27 @@ export default function NewPetScreen() {
         <View style={styles.card}>
           <EditText label="Pet name *" value={name} onChange={setName} placeholder="e.g. Bella" />
 
-          <EditSelect label="Species *" value={species} onChange={setSpecies}
-            options={SPECIES.map(s => ({ label: s, value: s }))} />
+          <EditSelect label="Species *" value={species}
+            onChange={(label) => {
+              const info = friendlySpeciesByLabel(label);
+              setSpecies(label);
+              setSpeciesCode(info?.code ?? "");
+              setBreed(""); setBreedCode(""); // reset breed on species change
+            }}
+            options={FRIENDLY_SPECIES.map(s => ({ label: s.label, value: s.label }))} />
 
           {species ? (
-            hasBreedList ? (
-              <>
-                <EditSelect label={`${breedLabel} *`} value={breedSelect} onChange={setBreedSelect}
-                  options={[...breedOptions.map(b => ({ label: b, value: b })), { label: OTHER_BREED_OPTION_LABEL, value: OTHER_LISTED_VALUE }]} />
-                {breedSelect === OTHER_LISTED_VALUE ? (
-                  <EditText label={`${breedLabel} (please specify) *`} value={breedCustom} onChange={setBreedCustom} placeholder={`Enter ${breedLabel.toLowerCase()}`} />
-                ) : null}
-              </>
+            hasBreedList && speciesInfo?.code ? (
+              <VenomCodePicker
+                label={`${breedLabel} *`}
+                category="breed"
+                parentCode={speciesInfo.code}
+                value={breed}
+                onPick={(pick) => { setBreed(pick?.display_text ?? ""); setBreedCode(pick?.code ?? ""); }}
+                placeholder={`Search ${breedLabel.toLowerCase()}…`}
+              />
             ) : (
-              <EditText label={`${breedLabel} *`} value={breedCustom} onChange={(v) => { setBreedCustom(v); setBreedSelect(OTHER_LISTED_VALUE); }} placeholder={`Enter ${breedLabel.toLowerCase()}`} />
+              <EditText label={`${breedLabel} *`} value={breed} onChange={(v) => { setBreed(v); setBreedCode(""); }} placeholder={`Enter ${breedLabel.toLowerCase()}`} />
             )
           ) : null}
 

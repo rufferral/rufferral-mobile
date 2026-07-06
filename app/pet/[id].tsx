@@ -26,18 +26,18 @@ import { profileCompletion, completionColor } from "@/lib/profileCompletion";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditNumberStepper } from "@/components/EditFields";
-import { SymptomTracker } from "@/components/SymptomTracker";
 import { PetTimeline } from "@/components/PetTimeline";
+import { VenomCodePicker } from "@/components/VenomCodePicker";
+import { FRIENDLY_SPECIES, friendlySpeciesByLabel } from "@/lib/speciesMapping";
 import { HealthDocuments } from "@/components/HealthDocuments";
-import { BREED_OPTIONS, OTHER_LISTED_VALUE, OTHER_BREED_OPTION_LABEL } from "@/lib/breedOptions";
 
-const SPECIES_OPTIONS = ["Bird", "Cat", "Dog", "Fish", "Guinea Pig", "Horse", "Other", "Rabbit", "Reptile"];
 const SEX_OPTS = ["Female desexed", "Female intact", "Male neutered", "Male intact"];
 import { INSURANCE_PROVIDERS } from "@/lib/insuranceProviders";
 
 // ── Types (ported from web) ────────────────────────────────────────────────
 type PetRow = {
   id: string; name: string | null; species: string | null; breed: string | null;
+  species_code: string | null; breed_code: string | null;
   sex: string | null; age: string | null; date_of_birth: string | null;
   photo_url: string | null; owner_id: string | null; microchip_number: string | null;
   food_brand: string | null; food_type: string | null; food_amount_grams: number | null;
@@ -181,9 +181,10 @@ export default function PetProfileScreen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const seedingHeader = useRef(false); // true while seeding so the species-change effect doesn't wipe breed
   const [hName, setHName] = useState("");
-  const [hSpecies, setHSpecies] = useState("");
-  const [hBreedSelect, setHBreedSelect] = useState("");
-  const [hBreedCustom, setHBreedCustom] = useState("");
+  const [hSpecies, setHSpecies] = useState("");        // friendly label (e.g. "Dog")
+  const [hSpeciesCode, setHSpeciesCode] = useState(""); // VeNom species code
+  const [hBreed, setHBreed] = useState("");            // breed display text
+  const [hBreedCode, setHBreedCode] = useState("");    // VeNom breed code (null for free-text)
   const [hSex, setHSex] = useState("");
   const [hDob, setHDob] = useState("");
   const [hWeight, setHWeight] = useState("");
@@ -192,21 +193,19 @@ export default function PetProfileScreen() {
     seedingHeader.current = true; // suppress the species-change breed-reset during seeding
     setHName(p.name ?? "");
     setHSpecies(p.species ?? "");
-    const breedList = BREED_OPTIONS[p.species ?? ""] ?? [];
-    if (p.breed && breedList.length > 0 && !breedList.includes(p.breed)) {
-      setHBreedSelect(OTHER_LISTED_VALUE); setHBreedCustom(p.breed);
-    } else {
-      setHBreedSelect(p.breed ?? ""); setHBreedCustom("");
-    }
+    // Backfill the species code from the friendly label if the stored code is null
+    // (existing pets predate coding), so editing doesn't require re-selecting species.
+    setHSpeciesCode(p.species_code ?? friendlySpeciesByLabel(p.species)?.code ?? "");
+    setHBreed(p.breed ?? "");
+    setHBreedCode(p.breed_code ?? "");
     setHSex(p.sex ?? "");
     setHDob(p.date_of_birth?.split("T")[0] ?? "");
     setHWeight(clinical.latestWeightKg != null ? String(clinical.latestWeightKg) : "");
   };
 
-  const headerBreedOptions = BREED_OPTIONS[hSpecies] ?? [];
-  const headerHasBreedList = headerBreedOptions.length > 0;
-  const headerBreedLabel = hSpecies === "Fish" || hSpecies === "Bird" || hSpecies === "Reptile" ? "Species/Type" : "Breed";
-  const headerResolvedBreed = () => hBreedSelect === OTHER_LISTED_VALUE ? hBreedCustom.trim() : hBreedSelect.trim();
+  const headerSpeciesInfo = friendlySpeciesByLabel(hSpecies);
+  const headerHasBreedList = !!headerSpeciesInfo?.hasBreeds;
+  const headerBreedLabel = (hSpecies === "Fish" || hSpecies === "Bird" || hSpecies === "Reptile") ? "Species/Type" : "Breed";
 
   const saveHeader = async () => {
     if (!hName.trim()) { Alert.alert("Required", "Pet name is required."); return; }
@@ -214,7 +213,9 @@ export default function PetProfileScreen() {
     const fields = {
       name: hName.trim(),
       species: hSpecies || null,
-      breed: headerResolvedBreed() || null,
+      species_code: hSpeciesCode || null,
+      breed: hBreed.trim() || null,
+      breed_code: hBreedCode || null,
       sex: hSex || null,
       date_of_birth: hDob || null,
     };
@@ -487,10 +488,9 @@ export default function PetProfileScreen() {
       return () => cancelAnimationFrame(raf);
     }
   }, [loadState, pet]);
-  // When species changes during header editing, reset the breed selection.
+  // Clear the seeding flag once seeded (breed reset on species change is handled inline in onChange).
   useEffect(() => {
-    if (seedingHeader.current) { seedingHeader.current = false; return; } // skip reset on initial seed
-    if (editingHeader) { setHBreedSelect(""); setHBreedCustom(""); }
+    if (seedingHeader.current) { seedingHeader.current = false; }
   }, [hSpecies]);
 
   if (loadState === "loading") {
@@ -579,18 +579,26 @@ export default function PetProfileScreen() {
         {editingHeader ? (
           <View style={{ marginTop: 18 }}>
             <EditText label="Pet name *" value={hName} onChange={setHName} placeholder="e.g. Bella" />
-            <EditSelect label="Species *" value={hSpecies} onChange={setHSpecies} options={SPECIES_OPTIONS.map(s => ({ label: s, value: s }))} />
+            <EditSelect label="Species *" value={hSpecies}
+              onChange={(label) => {
+                const info = friendlySpeciesByLabel(label);
+                setHSpecies(label);
+                setHSpeciesCode(info?.code ?? "");
+                if (!seedingHeader.current) { setHBreed(""); setHBreedCode(""); } // reset breed on species change
+              }}
+              options={FRIENDLY_SPECIES.map(s => ({ label: s.label, value: s.label }))} />
             {hSpecies ? (
-              headerHasBreedList ? (
-                <>
-                  <EditSelect label={`${headerBreedLabel} *`} value={hBreedSelect} onChange={setHBreedSelect}
-                    options={[...headerBreedOptions.map(b => ({ label: b, value: b })), { label: OTHER_BREED_OPTION_LABEL, value: OTHER_LISTED_VALUE }]} />
-                  {hBreedSelect === OTHER_LISTED_VALUE ? (
-                    <EditText label={`${headerBreedLabel} (please specify) *`} value={hBreedCustom} onChange={setHBreedCustom} placeholder={`Enter ${headerBreedLabel.toLowerCase()}`} />
-                  ) : null}
-                </>
+              headerHasBreedList && headerSpeciesInfo?.code ? (
+                <VenomCodePicker
+                  label={`${headerBreedLabel} *`}
+                  category="breed"
+                  parentCode={headerSpeciesInfo.code}
+                  value={hBreed}
+                  onPick={(pick) => { setHBreed(pick?.display_text ?? ""); setHBreedCode(pick?.code ?? ""); }}
+                  placeholder={`Search ${headerBreedLabel.toLowerCase()}…`}
+                />
               ) : (
-                <EditText label={`${headerBreedLabel} *`} value={hBreedCustom} onChange={(v) => { setHBreedCustom(v); setHBreedSelect(OTHER_LISTED_VALUE); }} placeholder={`Enter ${headerBreedLabel.toLowerCase()}`} />
+                <EditText label={`${headerBreedLabel}`} value={hBreed} onChange={(v) => { setHBreed(v); setHBreedCode(""); }} placeholder={`Enter ${headerBreedLabel.toLowerCase()}`} />
               )
             ) : null}
             <EditSelect label="Sex *" value={hSex} onChange={setHSex} options={SEX_OPTS.map(s => ({ label: s, value: s }))} />
@@ -777,11 +785,6 @@ export default function PetProfileScreen() {
         )}
         <HealthDocuments petId={petId} ownerId={pet.owner_id ?? ""} />
       </View>
-      </FadeIn>
-
-      {/* Symptom Tracker */}
-      <FadeIn go={cardsGo} delay={280} style={{ marginBottom: 16 }}>
-        <SymptomTracker petId={petId} ownerId={pet.owner_id ?? ""} />
       </FadeIn>
 
       {/* Nutrition & Diet */}
