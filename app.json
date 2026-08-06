@@ -18,7 +18,8 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Used to upload your pet's profile photo.",
-        "NSCameraUsageDescription": "Used to take your pet's profile photo."
+        "NSCameraUsageDescription": "Used to take your pet's profile photo.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -27,7 +28,10 @@
         "backgroundColor": "#0e6e56"
       },
       "package": "com.rufferral.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-router",

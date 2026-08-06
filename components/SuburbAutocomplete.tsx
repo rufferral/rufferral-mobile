@@ -41,7 +41,7 @@ export function SuburbAutocomplete({
     setLoading(true);
     const { data, error } = await supabase.rpc("search_suburbs", {
       search_term: term,
-      filter_state: filterState || null,
+      filter_state: null,        // always null — state auto-fills from selection, no need to pre-filter
       filter_country: ctry,
       max_results: 10,
     });

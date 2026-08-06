@@ -173,6 +173,45 @@ export default function PetProfileScreen() {
   const introRan = useRef(false);
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([]);
+  const [deletingPet, setDeletingPet] = useState(false);
+
+  // Delete this pet profile. Clinical event tables cascade on pet_id, so weights,
+  // conditions, medications, vaccinations and observations go with it.
+  const confirmDeletePet = () => {
+    if (!pet) return;
+    const petName = pet.name ?? "this pet";
+    Alert.alert(
+      `Delete ${petName}'s profile?`,
+      `This permanently deletes ${petName} and all their records — timeline events, weights, symptoms, conditions, vaccinations and medications. This can't be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingPet(true);
+            // Referrals may not cascade — check first so we fail clearly, not cryptically.
+            const { count: refCount } = await supabase
+              .from("referrals")
+              .select("id", { count: "exact", head: true })
+              .eq("pet_id", petId);
+            if ((refCount ?? 0) > 0) {
+              setDeletingPet(false);
+              Alert.alert(
+                "Can't delete yet",
+                `${petName} has ${refCount} referral${refCount === 1 ? "" : "s"} attached. Referral history has to be kept, so this profile can't be deleted while those exist.`
+              );
+              return;
+            }
+            const { error } = await supabase.from("pets").delete().eq("id", petId);
+            setDeletingPet(false);
+            if (error) { Alert.alert("Couldn't delete", error.message); return; }
+            router.replace("/(tabs)/pets");
+          },
+        },
+      ]
+    );
+  };
   const [practice, setPractice] = useState<PracticeInfo | null>(null);
 
   // ── Pet identity (header) editing ──
@@ -1009,6 +1048,23 @@ export default function PetProfileScreen() {
           </View>
         )}
       </View>
+      </FadeIn>
+
+      {/* Delete pet profile — pilot/testing convenience. Card fill/border so it sits
+          quietly on the page; same pill shape + text style as the completion banner. */}
+      <FadeIn go={cardsGo} delay={600}>
+        <TouchableOpacity
+          onPress={confirmDeletePet}
+          disabled={deletingPet}
+          activeOpacity={0.85}
+          style={{ borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.card, borderWidth: 0.75, borderColor: c.border, opacity: deletingPet ? 0.6 : 1 }}
+        >
+          {deletingPet ? (
+            <ActivityIndicator color={c.subtext} />
+          ) : (
+            <Text style={{ color: c.subtext, fontSize: 13, fontWeight: "700" }}>Delete {pet?.name ?? "this pet"}'s profile</Text>
+          )}
+        </TouchableOpacity>
       </FadeIn>
 
     </KeyboardAwareScrollView>

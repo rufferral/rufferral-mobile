@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import { Platform, Animated } from "react-native";
 import { useEffect, useRef } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/colors";
 import { HomeIcon, PetsIcon, ReferralsIcon, AccountIcon } from "@/components/TabIcons";
 import { useAppReady } from "@/context/AppReadyContext";
@@ -13,6 +14,11 @@ const OVERSHOOT_BUFFER = 60;
 
 export default function TabLayout() {
   const { splashDone } = useAppReady();
+  const insets = useSafeAreaInsets();
+  // Only Android needs the extra system-nav inset (its nav buttons/gesture bar overlap
+  // the bar). iOS already accounts for the home indicator via its base paddingBottom,
+  // so adding the inset there would push the bar too high — keep it 0 on iOS.
+  const bottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 24) : 0;
   // The bar's bottom extends OVERSHOOT_BUFFER px below the screen (hidden), so an upward
   // overshoot during the spring never reveals the page beneath. Rest position is translateY 0.
   const translateY = useRef(new Animated.Value(BAR_HEIGHT + 40)).current;
@@ -49,10 +55,10 @@ export default function TabLayout() {
           bottom: -OVERSHOOT_BUFFER,
           backgroundColor: Colors.brand,
           borderTopWidth: 0,
-          height: BAR_HEIGHT + OVERSHOOT_BUFFER,
+          height: BAR_HEIGHT + OVERSHOOT_BUFFER + bottomInset,
           paddingHorizontal: 40,
           paddingTop: 16,
-          paddingBottom: (Platform.OS === "ios" ? 30 : 16) + OVERSHOOT_BUFFER,
+          paddingBottom: (Platform.OS === "ios" ? 30 : 16) + OVERSHOOT_BUFFER + bottomInset,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.25,

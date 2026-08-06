@@ -208,9 +208,9 @@ export default function HomeScreen() {
       setPractice(null);
     }
 
-    await registerForPushNotifications(user.id);
     setLoading(false);
     setDashboardReady(true);
+    registerForPushNotifications(user.id).catch(() => {});
   }, []);
 
   useEffect(() => { void load(); }, [load]);
