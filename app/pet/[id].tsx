@@ -698,7 +698,7 @@ export default function PetProfileScreen() {
       {/* Lifetime Timeline — the longitudinal record (hero feature) */}
       <View onLayout={(e) => { timelineY.current = e.nativeEvent.layout.y; }}>
         <FadeIn go={cardsGo} delay={0} style={{ marginBottom: 16 }}>
-          <PetTimeline petId={petId} ownerId={pet.owner_id ?? ""} dateOfBirth={pet.date_of_birth} onRequestScrollTo={() => smoothScrollTo(Math.max(0, timelineY.current - 12), 1400)} />
+          <PetTimeline petId={petId} ownerId={pet.owner_id ?? ""} dateOfBirth={pet.date_of_birth} petName={pet.name} onRequestScrollTo={() => smoothScrollTo(Math.max(0, timelineY.current - 12), 1400)} />
         </FadeIn>
       </View>
 

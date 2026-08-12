@@ -32,12 +32,12 @@ function dateToIso(ymd: string): string {
   return new Date(ymd + "T12:00:00").toISOString();
 }
 
-const ALL_KINDS: TimelineEventKind[] = ["weight", "symptom", "condition", "vaccination", "medication", "referral"];
+const ALL_KINDS: TimelineEventKind[] = ["weight", "symptom", "condition", "vaccination", "medication", "referral", "birthday"];
 // Event types the owner can ADD from the timeline (referrals are created via the vet flow, not here).
 const ADDABLE: TimelineEventKind[] = ["weight", "symptom", "condition", "vaccination", "medication"];
 const BUCKET = "symptom-photos";
 
-export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: { petId: string; ownerId: string; dateOfBirth?: string | null; onRequestScrollTo?: (y: number) => void }) {
+export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScrollTo }: { petId: string; ownerId: string; dateOfBirth?: string | null; petName?: string | null; onRequestScrollTo?: (y: number) => void }) {
   const router = useRouter();
   const cardY = useRef(0);
   const [events, setEvents] = useState<TimelineEvent[]>([]);
@@ -69,7 +69,7 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: 
 
   const load = useCallback(async () => {
     setLoading(true);
-    const evts = await loadPetTimeline(petId, dateOfBirth);
+    const evts = await loadPetTimeline(petId, dateOfBirth, petName);
     setEvents(evts);
     setLoading(false);
   }, [petId, dateOfBirth]);
@@ -160,11 +160,13 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: 
     const meta = KIND_META[e.kind];
     const onCircle = meta.color === "#ffffff" ? Colors.brand : "#ffffff";
     const drawLine = showLine !== undefined ? showLine : !isLast;
+    const hasExtra = !!(e.subtitle || (e.photoUrls && e.photoUrls.length > 0) || (e.kind === "referral" && e.referralId));
+    const railTopSpacer = hasExtra ? 15 : 4; // shorter spacer for two-line events (date + title only)
     return (
       <View key={e.id} style={{ flexDirection: "row", gap: 12 }}>
         {/* Rail: glyph circle + connector line */}
         <View style={{ width: 28, alignItems: "center" }}>
-          <View style={{ height: 15 }} />
+          <View style={{ height: railTopSpacer }} />
           <View style={{ height: 28, width: 28, borderRadius: 14, backgroundColor: meta.color, alignItems: "center", justifyContent: "center" }}>
             {HAS_SVG_ICON[e.kind] ? (
               <TimelineIcon kind={e.kind} size={28} color={onCircle} />
@@ -185,10 +187,12 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: 
         </View>
         {/* Content */}
         <View style={{ flex: 1, paddingBottom: isLast ? 0 : 18 }}>
-          <Text style={{ fontSize: 11, color: c.muted, marginBottom: 2 }}>
-            {formatDate(e.date)}
-            <Text style={{ color: meta.color === "#ffffff" ? c.subtext : meta.color }}>  ·  {meta.label}</Text>
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+            <Text style={{ fontSize: 11, color: c.muted }}>{formatDate(e.date)}</Text>
+            <View style={{ backgroundColor: meta.color === "#ffffff" ? c.cardInner : meta.color, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 1.5 }}>
+              <Text style={{ fontSize: 10, fontWeight: "700", color: meta.color === "#ffffff" ? c.subtext : "#ffffff" }}>{meta.label}</Text>
+            </View>
+          </View>
           <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{e.title}</Text>
           {e.subtitle ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2, lineHeight: 20 }}>{e.subtitle}</Text> : null}
 
@@ -196,7 +200,9 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, onRequestScrollTo }: 
           {e.kind === "referral" && e.referralId ? (
             <View style={{ marginTop: 10 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <Text style={{ fontSize: 12, fontWeight: "600", color: e.progressColor ?? c.subtext }}>{e.statusLabel ?? "In progress"}</Text>
+                <View style={{ backgroundColor: e.progressColor ?? c.cardInner, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 1.5 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: "#ffffff" }}>{e.statusLabel ?? "In progress"}</Text>
+                </View>
                 <Text style={{ fontSize: 11, color: c.muted }}>{e.progressPercent ?? 0}%</Text>
               </View>
               <View style={{ height: 6, borderRadius: 999, backgroundColor: c.cardInner, overflow: "hidden" }}>
@@ -424,7 +430,7 @@ function FadeInRow({ delay = 0, run, children }: { delay?: number; run: boolean;
 // clips/reveals the always-mounted children. Natural content height caps it, so
 // there's no race and the first expand works reliably.
 const REVEAL_DURATION = 1400;
-const REVEAL_MAX = 900; // ceiling for reveal section
+const REVEAL_MAX = 5000; // generous ceiling to accommodate long timelines with birthday events
 function RevealSection({ expanded, children }: { expanded: boolean; children: React.ReactNode }) {
   const maxH = useRef(new Animated.Value(expanded ? REVEAL_MAX : 0)).current;
   useEffect(() => {

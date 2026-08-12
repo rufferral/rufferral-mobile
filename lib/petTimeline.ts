@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase";
 
 // A single normalized event on the pet's lifetime timeline.
 export type TimelineEventKind =
-  | "weight" | "symptom" | "condition" | "vaccination" | "medication" | "referral" | "birth";
+  | "weight" | "symptom" | "condition" | "vaccination" | "medication" | "referral" | "birth" | "birthday";
 
 export type TimelineEvent = {
   id: string;                 // unique across kinds: `${kind}:${rowId}`
@@ -53,6 +53,7 @@ function referralStatusLabel(status: string | null | undefined, idx: number): st
 // component and any legend stay in sync.
 export const KIND_META: Record<TimelineEventKind, { label: string; color: string; glyph: string }> = {
   birth:       { label: "Born",        color: "#ffffff", glyph: "★" },
+  birthday:    { label: "Birthday",   color: "#ffffff", glyph: "🎂" },
   weight:      { label: "Weight",      color: "#10b981", glyph: "⚖" },
   symptom:     { label: "Symptom",     color: "#f59e0b", glyph: "✦" },
   condition:   { label: "Diagnosis",   color: "#ef4444", glyph: "✚" },
@@ -71,7 +72,7 @@ function iso(v: unknown): string | null {
  * merged newest-first. This is a READ-ONLY aggregation over the existing event
  * tables — the specialized capture tools remain the source of truth.
  */
-export async function loadPetTimeline(petId: string, dateOfBirth?: string | null): Promise<TimelineEvent[]> {
+export async function loadPetTimeline(petId: string, dateOfBirth?: string | null, petName?: string | null): Promise<TimelineEvent[]> {
   const [weights, symptoms, conditions, vaccinations, medications, referrals] = await Promise.all([
     supabase.from("pet_weights").select("id, weight_kg, recorded_at, source").eq("pet_id", petId),
     supabase.from("pet_observations").select("id, display_text, notes, photo_urls, observed_at, source").eq("pet_id", petId).eq("kind", "symptom"),
@@ -146,7 +147,32 @@ export async function loadPetTimeline(petId: string, dateOfBirth?: string | null
 
   // Birth anchor at the very start of the timeline (oldest).
   const dob = iso(dateOfBirth ?? null);
-  if (dob) events.push({ id: "birth:pet", kind: "birth", date: dob, title: "Born", subtitle: null });
+  if (dob) {
+    events.push({ id: "birth:pet", kind: "birth", date: dob, title: "Born", subtitle: null });
+
+    // Generate birthday anniversaries from DOB up to today.
+    const dobDate = new Date(dob);
+    const today = new Date();
+    const ordinal = (n: number) => {
+      const s = ["th", "st", "nd", "rd"];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    };
+    const namePrefix = petName ? `${petName}'s` : "";
+    for (let year = 1; ; year++) {
+      const bday = new Date(dobDate);
+      bday.setFullYear(dobDate.getFullYear() + year);
+      if (bday > today) break;
+      const bdayIso = bday.toISOString();
+      events.push({
+        id: `birthday:${year}`,
+        kind: "birthday",
+        date: bdayIso,
+        title: namePrefix ? `${namePrefix} ${ordinal(year)} birthday` : `${ordinal(year)} birthday`,
+        subtitle: null,
+      });
+    }
+  }
 
   // Newest first.
   events.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
