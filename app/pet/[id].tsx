@@ -29,6 +29,8 @@ import { EditText, EditDate, EditSelect, EditSelectSearch, EditCardHeader, EditN
 import { PetTimeline } from "@/components/PetTimeline";
 import { VenomCodePicker } from "@/components/VenomCodePicker";
 import { FRIENDLY_SPECIES, friendlySpeciesByLabel } from "@/lib/speciesMapping";
+import { exportPetPdf } from "@/lib/exportPetPdf";
+import { loadPetTimeline, type TimelineEvent } from "@/lib/petTimeline";
 import { HealthDocuments } from "@/components/HealthDocuments";
 
 const SEX_OPTS = ["Female desexed", "Female intact", "Male neutered", "Male intact"];
@@ -174,6 +176,48 @@ export default function PetProfileScreen() {
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([]);
   const [deletingPet, setDeletingPet] = useState(false);
+  const [sharingRecord, setSharingRecord] = useState(false);
+
+  // Export the pet's full profile + timeline as a shareable PDF.
+  const handleShareRecord = async () => {
+    if (!pet) return;
+    setSharingRecord(true);
+    try {
+      const [events, ownerRes, remindersRes] = await Promise.all([
+        loadPetTimeline(petId, pet.date_of_birth, pet.name),
+        supabase.from("profiles").select("full_name, email, phone").eq("id", pet.owner_id ?? "").maybeSingle(),
+        supabase.from("pet_reminders").select("vaccination_id, reminder_date").eq("pet_id", petId).eq("kind", "vaccination").eq("dismissed", false),
+      ]);
+      const owner = ownerRes.data as any;
+      const reminderMap: Record<string, { reminder_date: string }> = {};
+      for (const r of (remindersRes.data ?? []) as any[]) {
+        if (r.vaccination_id) reminderMap[r.vaccination_id] = { reminder_date: r.reminder_date };
+      }
+
+      await exportPetPdf({
+        name: pet.name ?? "Unknown",
+        species: pet.species, breed: pet.breed, sex: pet.sex,
+        dateOfBirth: pet.date_of_birth,
+        microchipNumber: pet.microchip_number,
+        latestWeightKg: clinical.latestWeightKg,
+        ownerName: owner?.full_name ?? null,
+        ownerEmail: owner?.email ?? null,
+        ownerPhone: owner?.phone ?? null,
+        foodBrand: pet.food_brand, foodType: pet.food_type, foodAmountGrams: pet.food_amount_grams,
+        feedingFrequency: pet.feeding_frequency, treats: pet.treats, supplements: pet.supplements,
+        foodSensitivities: pet.food_sensitivities,
+        exerciseDurationMins: pet.exercise_duration_mins, exerciseTypes: pet.exercise_types,
+        livingSituation: pet.living_situation, backyardAccess: pet.backyard_access,
+        otherPets: pet.other_pets, temperament: pet.temperament, trainingLevel: pet.training_level,
+        vaccinationStatus: pet.vaccination_status, desexedDate: pet.desexed_date,
+        acquisitionSource: pet.acquisition_source,
+        insuranceProvider: pet.insurance_provider, insurancePolicyNumber: pet.insurance_policy_number,
+      }, events, reminderMap);
+    } catch (err: any) {
+      Alert.alert("Export failed", err?.message ?? "Something went wrong.");
+    }
+    setSharingRecord(false);
+  };
 
   // Delete this pet profile. Clinical event tables cascade on pet_id, so weights,
   // conditions, medications, vaccinations and observations go with it.
@@ -593,9 +637,14 @@ export default function PetProfileScreen() {
             </TouchableOpacity>
           </>
         ) : (
-          <TouchableOpacity onPress={() => { if (pet) seedHeaderFields(pet); setEditingHeader(true); }} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
-            <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>Edit</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity onPress={handleShareRecord} activeOpacity={0.8} style={{ position: "absolute", top: 12, left: 12, zIndex: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
+              <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>Share</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { if (pet) seedHeaderFields(pet); setEditingHeader(true); }} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 999, borderWidth: 0.75, borderColor: c.border }}>
+              <Text style={{ color: c.text, fontSize: 13, fontWeight: "600" }}>Edit</Text>
+            </TouchableOpacity>
+          </>
         )}
 
         <View style={{ alignItems: "center", marginTop: editingHeader ? 24 : 0 }}>

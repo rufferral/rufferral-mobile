@@ -45,6 +45,45 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScr
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<TimelineEventKind | null>(null); // null = all
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [reminders, setReminders] = useState<Record<string, { id: string; reminder_date: string }>>({});
+
+  // Load existing vaccination reminders for this pet.
+  const loadReminders = useCallback(async () => {
+    const { data } = await supabase
+      .from("pet_reminders")
+      .select("id, vaccination_id, reminder_date")
+      .eq("pet_id", petId)
+      .eq("kind", "vaccination")
+      .eq("dismissed", false);
+    const map: Record<string, { id: string; reminder_date: string }> = {};
+    for (const r of (data ?? []) as any[]) {
+      if (r.vaccination_id) map[r.vaccination_id] = { id: r.id, reminder_date: r.reminder_date };
+    }
+    setReminders(map);
+  }, [petId]);
+
+  // Set or update a vaccination reminder.
+  const setReminder = async (vaccinationId: string, vaccinationTitle: string, reminderDate: string) => {
+    const existing = reminders[vaccinationId];
+    if (existing) {
+      await supabase.from("pet_reminders").update({ reminder_date: reminderDate }).eq("id", existing.id);
+    } else {
+      await supabase.from("pet_reminders").insert({
+        pet_id: petId, owner_id: ownerId, vaccination_id: vaccinationId,
+        kind: "vaccination", title: `${vaccinationTitle} due`, reminder_date: reminderDate,
+      });
+    }
+    await loadReminders();
+  };
+
+  // Remove a vaccination reminder.
+  const removeReminder = async (vaccinationId: string) => {
+    const existing = reminders[vaccinationId];
+    if (existing) {
+      await supabase.from("pet_reminders").delete().eq("id", existing.id);
+      await loadReminders();
+    }
+  };
 
   // Expand/collapse choreography.
   //  Expand:   drawLine (line grows from last visible circle to tab) → grow (card) → fade-in rows
@@ -66,17 +105,20 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScr
   const [fProduct, setFProduct] = useState("");  // vaccine product / medication product
   const [fPhotos, setFPhotos] = useState<string[]>([]);
   const [fDate, setFDate] = useState(todayStr()); // event date (YYYY-MM-DD), defaults to today
+  const [fReminder, setFReminder] = useState(false);
+  const [fReminderDate, setFReminderDate] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     const evts = await loadPetTimeline(petId, dateOfBirth, petName);
     setEvents(evts);
     setLoading(false);
+    await loadReminders();
   }, [petId, dateOfBirth]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const resetForm = () => { setFName(""); setFNotes(""); setFNum(""); setFUnit(""); setFProduct(""); setFPhotos([]); setFDate(todayStr()); };
+  const resetForm = () => { setFName(""); setFNotes(""); setFNum(""); setFUnit(""); setFProduct(""); setFPhotos([]); setFDate(todayStr()); setFReminder(false); setFReminderDate(""); };
   const closeAdd = () => { setAdding(false); setAddKind(null); resetForm(); };
 
   const addFromLibrary = async () => {
@@ -133,8 +175,15 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScr
       } else if (addKind === "vaccination") {
         if (!fName.trim()) { Alert.alert("Add a vaccination", "Please enter the vaccination."); return; }
         setSaving(true);
-        const { error } = await supabase.from("pet_vaccinations").insert({ ...base, code_system: null, code: null, display_text: fName.trim(), product: fProduct.trim() || null, administered_at: eventIso, recorded_at: now });
+        const { data: vacData, error } = await supabase.from("pet_vaccinations").insert({ ...base, code_system: null, code: null, display_text: fName.trim(), product: fProduct.trim() || null, administered_at: eventIso, recorded_at: now }).select("id").single();
         if (error) throw error;
+        // Create a reminder if the owner toggled it on.
+        if (fReminder && fReminderDate && vacData?.id) {
+          await supabase.from("pet_reminders").insert({
+            pet_id: petId, owner_id: ownerId, vaccination_id: vacData.id,
+            kind: "vaccination", title: `${fName.trim()} due`, reminder_date: fReminderDate,
+          });
+        }
       } else if (addKind === "medication") {
         if (!fName.trim()) { Alert.alert("Add a medication", "Please enter the medication."); return; }
         setSaving(true);
@@ -195,6 +244,44 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScr
           </View>
           <Text style={{ fontSize: 15, fontWeight: "700", color: c.text }}>{e.title}</Text>
           {e.subtitle ? <Text style={{ fontSize: 14, color: c.subtext, marginTop: 2, lineHeight: 20 }}>{e.subtitle}</Text> : null}
+
+          {/* Vaccination reminder */}
+          {e.kind === "vaccination" ? (() => {
+            const vacId = e.id.replace("vaccination:", "");
+            const existing = reminders[vacId];
+            const defaultDate = new Date(e.date);
+            defaultDate.setFullYear(defaultDate.getFullYear() + 1);
+            const defaultDateStr = defaultDate.toISOString().split("T")[0];
+            const isOverdue = existing && new Date(existing.reminder_date) <= new Date();
+            return (
+              <View style={{ marginTop: 8 }}>
+                {existing ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ backgroundColor: isOverdue ? "#ef4444" : "#3b82f6", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#ffffff" }}>
+                        {isOverdue ? "Overdue" : "Reminder set ✓"}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 12, color: c.subtext }}>{formatDate(existing.reminder_date)}</Text>
+                    <TouchableOpacity onPress={() => removeReminder(vacId)} activeOpacity={0.7}>
+                      <Text style={{ fontSize: 11, color: c.muted }}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => setReminder(vacId, e.subtitle || e.title, defaultDateStr)}
+                    activeOpacity={0.7}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                  >
+                    <View style={{ backgroundColor: c.cardInner, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#ffffff" }}>Set reminder?</Text>
+                    </View>
+                    <Text style={{ fontSize: 12, color: c.subtext }}>{formatDate(defaultDateStr)}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })() : null}
 
           {/* Referral: mini progress bar + navigate button */}
           {e.kind === "referral" && e.referralId ? (
@@ -284,6 +371,8 @@ export function PetTimeline({ petId, ownerId, dateOfBirth, petName, onRequestScr
               fUnit={fUnit} setFUnit={setFUnit}
               fProduct={fProduct} setFProduct={setFProduct}
               fDate={fDate} setFDate={setFDate}
+              fReminder={fReminder} setFReminder={setFReminder}
+              fReminderDate={fReminderDate} setFReminderDate={setFReminderDate}
               fPhotos={fPhotos} removePhoto={(u) => setFPhotos(prev => prev.filter(x => x !== u))}
               addFromLibrary={addFromLibrary} addFromCamera={addFromCamera}
               saving={saving} onSave={() => void save()} onBack={() => { setAddKind(null); resetForm(); }}
@@ -468,6 +557,8 @@ type AddFormProps = {
   fUnit: string; setFUnit: (v: string) => void;
   fProduct: string; setFProduct: (v: string) => void;
   fDate: string; setFDate: (v: string) => void;
+  fReminder: boolean; setFReminder: (v: boolean) => void;
+  fReminderDate: string; setFReminderDate: (v: string) => void;
   fPhotos: string[]; removePhoto: (u: string) => void;
   addFromLibrary: () => void; addFromCamera: () => void;
   saving: boolean; onSave: () => void; onBack: () => void;
@@ -542,6 +633,30 @@ function AddForm(p: AddFormProps) {
           <TextInput value={p.fName} onChangeText={p.setFName} placeholder="e.g. Annual C5" placeholderTextColor={c.muted} style={inputStyle} />
           <Text style={[fieldLabel, { marginTop: 12 }]}>Product (optional)</Text>
           <TextInput value={p.fProduct} onChangeText={p.setFProduct} placeholder="e.g. Nobivac DHP" placeholderTextColor={c.muted} style={inputStyle} />
+          <TouchableOpacity
+            onPress={() => {
+              const on = !p.fReminder;
+              p.setFReminder(on);
+              if (on && !p.fReminderDate) {
+                // Default reminder: 12 months from the vaccination date.
+                const d = new Date(p.fDate || Date.now());
+                d.setFullYear(d.getFullYear() + 1);
+                p.setFReminderDate(d.toISOString().split("T")[0]);
+              }
+            }}
+            activeOpacity={0.7}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14 }}
+          >
+            <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: p.fReminder ? "#3b82f6" : c.border, backgroundColor: p.fReminder ? "#3b82f6" : "transparent", alignItems: "center", justifyContent: "center" }}>
+              {p.fReminder ? <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700", lineHeight: 15 }}>✓</Text> : null}
+            </View>
+            <Text style={{ fontSize: 13, color: c.text, fontWeight: "600" }}>Set a reminder for next dose</Text>
+          </TouchableOpacity>
+          {p.fReminder ? (
+            <View style={{ marginTop: 8 }}>
+              <EditDate label="Reminder date" value={p.fReminderDate} onChange={p.setFReminderDate} />
+            </View>
+          ) : null}
         </>
       ) : null}
 
